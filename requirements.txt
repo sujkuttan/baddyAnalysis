@@ -1,0 +1,10 @@
+opencv-python
+numpy
+scipy
+pandas
+matplotlib
+torch
+torchvision
+ultralytics
+google-generativeai
+openai

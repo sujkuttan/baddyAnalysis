@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pt
+*.pth
+*.onnx
+data/
+weights/
+.env
+*.mp4
+*.ipynb_checkpoints/
