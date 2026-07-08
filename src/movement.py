@@ -1,9 +1,30 @@
 import numpy as np
+from scipy.ndimage import median_filter
 
 from .config import COURT_WIDTH, COURT_LENGTH
 
 
-def _speed(pos, fps, max_step=1.5):
+def _smooth(pos, win=3):
+    """Temporal median filter to suppress pose-jitter spikes; preserves nans."""
+    pos = np.array(pos, dtype=np.float64)
+    if win < 2 or len(pos) < 2:
+        return pos
+    out = pos.copy()
+    nanmask = np.isnan(pos)
+    for c in range(pos.shape[1]):
+        col = pos[:, c]
+        valid = ~np.isnan(col)
+        if valid.sum() < 2:
+            continue
+        col_f = col.copy()
+        col_f[~valid] = np.interp(np.where(~valid)[0], np.where(valid)[0], col[valid])
+        sm = median_filter(col_f, size=win, mode="nearest")
+        sm[nanmask[:, c]] = np.nan
+        out[:, c] = sm
+    return out
+
+
+def _speed(pos, fps, max_step=0.8):
     pos = np.array(pos, dtype=np.float64)
     v = np.full(len(pos), np.nan)
     if len(pos) < 2:
@@ -16,10 +37,10 @@ def _speed(pos, fps, max_step=1.5):
     return v
 
 
-def compute_movement(positions, fps, max_step=1.5):
+def compute_movement(positions, fps, max_step=0.8):
     out = {}
     for pid, pos in positions.items():
-        pos = np.array(pos, dtype=np.float64)
+        pos = _smooth(pos, win=3)
         valid = ~np.any(np.isnan(pos), axis=1)
         speed = _speed(pos, fps, max_step=max_step)
         if valid.sum() > 1:
@@ -68,10 +89,10 @@ def zone_coverage(positions, nz=3):
     return cov
 
 
-def fatigue_profile(positions, fps, window_sec=30.0, max_step=1.5):
+def fatigue_profile(positions, fps, window_sec=30.0, max_step=0.8):
     res = {}
     for pid, pos in positions.items():
-        pos = np.array(pos, dtype=np.float64)
+        pos = _smooth(pos, win=3)
         speed = _speed(pos, fps, max_step=max_step)
         valid = ~np.isnan(speed)
         speed = speed[valid]

@@ -7,7 +7,7 @@ import torch
 
 from . import stabilize, pose as posemod, shuttle as shuttlemod, contact as contactmod
 from . import biomech, racket_bootstrap, movement, baseline, viz, llm_feedback, ab_eval
-from .config import STROKE_TO_ID, canonical_stroke, COURT_LENGTH, validate_court_corners
+from .config import STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH, validate_court_corners
 
 
 def _wrist_stream(players, pid):
@@ -77,6 +77,10 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     for i in range(len(Hs)):
         if i < len(shuttle_img) and not np.any(np.isnan(np.array(shuttle_img[i], dtype=np.float64))):
             shuttle_court[i] = stabilize.warp_points(H0, np.array(shuttle_img[i], dtype=np.float64).reshape(1, 2))[0]
+    # Mask shuttle detections outside the court (false positives / teleports).
+    oob = ((shuttle_court[:, 0] < -0.5) | (shuttle_court[:, 0] > COURT_WIDTH + 0.5) |
+           (shuttle_court[:, 1] < -0.5) | (shuttle_court[:, 1] > COURT_LENGTH + 0.5))
+    shuttle_court[oob] = np.nan
     contacts = contactmod.detect_contacts_near_players(
         shuttle_court, {p: players[p]["pose_court"] for p in players}, fps, max_dist=2.0)
     if len(contacts) == 0:
@@ -124,9 +128,9 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     _write_predictions(out_dir, contacts, attrib, preds, frame_to_shot)
 
     print("[6/8] movement + fatigue analytics...")
-    mv = movement.compute_movement(foot_streams, fps, max_step=1.5)
+    mv = movement.compute_movement(foot_streams, fps, max_step=0.8)
     hm = movement.court_heatmap(foot_streams)
-    fat = movement.fatigue_profile(foot_streams, fps, max_step=1.5)
+    fat = movement.fatigue_profile(foot_streams, fps, max_step=0.8)
     metrics = {
         "movement": {p: {"total_distance_m": mv[p]["total_distance_m"],
                          "mean_speed": mv[p]["mean_speed"],
