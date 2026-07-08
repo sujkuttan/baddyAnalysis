@@ -81,6 +81,9 @@ corners = json.load(open('corners.json'))['corners']
 
 BATCH_SIZE = 128
 SAMPLE_FRAMES = 900  # ~15s at 60fps; set to None for the full video
+# NOTE: the 100 labeled shots are spread across the whole match, so the fusion
+# classifier only trains when labeled frames fall inside the processed range.
+# Use SAMPLE_FRAMES=None (full video) to include all labels and train the model.
 print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES} ---')
 res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',

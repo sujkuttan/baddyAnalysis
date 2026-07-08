@@ -37,16 +37,15 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     frames_all = []
     shuttle_img = []
     n_read = 0
-    while True:
+    cap_max = max_frames if max_frames is not None else float("inf")
+    while n_read < cap_max:
         batch = []
-        while len(batch) < batch_size:
+        while len(batch) < batch_size and n_read < cap_max:
             ret, f = cap.read()
             if not ret:
                 break
             batch.append(f)
             n_read += 1
-            if max_frames is not None and n_read >= max_frames:
-                break
         if not batch:
             break
         for f in batch:
@@ -88,7 +87,11 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         frame_to_shot = _label_frame_map(labels_csv)
         print("  training fusion classifier on labeled shots...")
         try:
-            preds = _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device)
+            trained = _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device)
+            if trained is None:
+                print("  too few matching labeled shots; keeping geometry baseline predictions")
+            else:
+                preds = trained
         except Exception as e:
             print("  classifier training failed, using baseline:", e)
 
