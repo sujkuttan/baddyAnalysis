@@ -50,7 +50,7 @@ def kinetic_chain(court_poses, contact_frame, fps, window=14):
 
 def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=None):
     if player_ids is None:
-        player_ids = PLAYER_IDS
+        player_ids = list(poses_court.keys())
     attrib = []
     for cf in contact_frames:
         if cf >= len(shuttle_court) or np.any(np.isnan(shuttle_court[cf])):

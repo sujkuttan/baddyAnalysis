@@ -50,23 +50,39 @@ class FusionClassifier(nn.Module):
         return self.head(torch.cat(emb, dim=1))
 
 
+def _interp_pose(seq):
+    seq = seq.copy()
+    for j in range(seq.shape[1]):
+        for c in range(seq.shape[2]):
+            col = seq[:, j, c]
+            if np.all(np.isnan(col)):
+                col[:] = 0.0
+            else:
+                idx = np.arange(len(col))
+                good = ~np.isnan(col)
+                col[~good] = np.interp(idx[~good], idx[good], col[good])
+    return seq
+
+
 def extract_stroke_windows(court_poses, racket_traj, mbh_seq, contact_frames,
-                           attrib, window=20, n_joints=17):
+                            attrib, window=20, n_joints=17):
     samples = []
     for cf, pid in zip(contact_frames, attrib):
         if pid is None:
+            continue
+        if pid not in court_poses:
             continue
         lo = max(0, cf - window // 2)
         hi = min(len(court_poses[pid]), cf + window // 2 + 1)
         if hi - lo < 5:
             continue
         pseq = court_poses[pid][lo:hi]
-        if np.any(np.isnan(pseq.reshape(-1, 2))):
-            continue
-        rseq = racket_traj[lo:hi]
-        mseq = mbh_seq[lo:hi]
-        if np.any(np.isnan(rseq)) or len(mseq) == 0:
+        if np.any(np.isnan(pseq)):
+            pseq = _interp_pose(pseq)
+        rseq = racket_traj.get(pid, np.zeros((len(court_poses[pid]), 2)))[lo:hi]
+        if np.any(np.isnan(rseq)) or len(rseq) == 0:
             rseq = np.zeros((hi - lo, 2))
+        mseq = mbh_seq[lo:hi]
         samples.append({
             "pose": normalize_pose_seq(pseq)[0],
             "racket": np.nan_to_num(rseq),

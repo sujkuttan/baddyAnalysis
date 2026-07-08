@@ -160,13 +160,14 @@ def _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs
         def _matches(w):
             return sum(1 for s in samples_all
                        if any(f < len(Hs) and abs(f - s["contact"]) <= w for f in frame_to_label))
-        print(f"[debug] samples={len(samples_all)} matched@3={_matches(3)} matched@10={_matches(10)}")
+        print(f"[debug] samples={len(samples_all)} matched@3={_matches(3)} matched@10={_matches(10)} matched@15={_matches(15)}")
+    MATCH_WINDOW = 15
     train, val = [], []
     for s in samples_all:
         near = min(frame_to_label.keys(), key=lambda k: abs(k - s["contact"])) if frame_to_label else None
-        if near is not None and abs(near - s["contact"]) <= 3:
+        if near is not None and abs(near - s["contact"]) <= MATCH_WINDOW:
             s["label"] = STROKE_TO_ID[frame_to_label[near]]
-            (train if len(train) < len(frame_to_label) * 0.8 else val).append(s)
+            (train if len(train) < max(1, int(len(frame_to_label) * 0.8)) else val).append(s)
     if len(train) < 5:
         return None
     model = clfmod.train_classifier(train, val, len(STROKE_TO_ID), device=device)
