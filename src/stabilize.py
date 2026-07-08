@@ -66,25 +66,22 @@ def stabilize_video(video_path, corners0, n_per_side=6, max_frames=None):
         if prev_gray is not None:
             nxt, st = _lk_track(prev_gray, gray, img_pts)
             good_mask = (st.reshape(-1) == 1)
-            nxt_good = nxt.reshape(-1, 2)[good_mask]
-            court_good = court_pts[good_mask]
-            if len(nxt_good) >= max(6, 0.4 * len(court_pts)):
-                H, mask = cv2.findHomography(
+            nxt_pts = nxt.reshape(-1, 2)
+            n_good = int(good_mask.sum())
+            used_counts.append(n_good)
+            if n_good >= max(6, int(0.4 * len(court_pts))):
+                nxt_good = nxt_pts[good_mask]
+                court_good = court_pts[good_mask]
+                H, _ = cv2.findHomography(
                     nxt_good.reshape(-1, 1, 2),
                     court_good.reshape(-1, 1, 2),
                     cv2.RANSAC, 4.0,
                 )
                 if H is not None:
                     H_prev = H
-                    img_pts = nxt_good.astype(np.float32)
-                    used_counts.append(int(good_mask.sum()))
-                else:
-                    used_counts.append(int(good_mask.sum()))
-            else:
-                used_counts.append(int(good_mask.sum()))
+            img_pts = np.where(good_mask[:, None], nxt_pts, img_pts).astype(np.float32)
         Hs.append(H_prev.copy())
         prev_gray = gray
-        img_pts = img_pts
         n += 1
 
     cap.release()
