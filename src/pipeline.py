@@ -77,10 +77,16 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     for i in range(len(Hs)):
         if i < len(shuttle_img) and not np.any(np.isnan(np.array(shuttle_img[i], dtype=np.float64))):
             shuttle_court[i] = stabilize.warp_points(H0, np.array(shuttle_img[i], dtype=np.float64).reshape(1, 2))[0]
-    contacts = contactmod.detect_contact_frames(shuttle_court, fps, angle_thresh_deg=50.0, min_speed=1.0)
+    contacts = contactmod.detect_contacts_near_players(
+        shuttle_court, {p: players[p]["pose_court"] for p in players}, fps, max_dist=2.0)
+    if len(contacts) == 0:
+        contacts = contactmod.detect_contact_frames(shuttle_court, fps, angle_thresh_deg=50.0, min_speed=1.0)
     cov = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
+    spd = np.linalg.norm(contactmod.shuttle_speed(shuttle_court, fps), axis=1)
     print(f"[shuttle] frames={len(Hs)} shuttle_nonnan={cov} "
-          f"({100*cov/max(len(Hs),1):.1f}%) contacts={len(contacts)}")
+          f"({100*cov/max(len(Hs),1):.1f}%) contacts={len(contacts)} "
+          f"speed_m/s min={np.nanmin(spd):.2f} med={np.nanmedian(spd):.2f} "
+          f"max={np.nanmax(spd):.2f} frac>1m/s={100*float(np.nanmean(spd > 1.0)):.1f}%")
     if debug and contacts:
         print("[debug] first contacts:", contacts[:20])
     if len(contacts) == 0:
