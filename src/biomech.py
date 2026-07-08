@@ -48,27 +48,33 @@ def kinetic_chain(court_poses, contact_frame, fps, window=14):
     }
 
 
-def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=None):
+def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=None, window=3):
     if player_ids is None:
         player_ids = list(poses_court.keys())
     attrib = []
     for cf in contact_frames:
-        if cf >= len(shuttle_court) or np.any(np.isnan(shuttle_court[cf])):
+        if shuttle_court is not None and (cf >= len(shuttle_court) or np.any(np.isnan(shuttle_court[cf]))):
             attrib.append(None)
             continue
         best, best_d = None, np.inf
+        lo = max(0, cf - window)
+        if shuttle_court is not None:
+            hi = min(len(shuttle_court), cf + window + 1)
+        else:
+            hi = cf + window + 1
         for pid in player_ids:
-            if pid not in poses_court:
+            pseq = poses_court.get(pid)
+            if pseq is None or len(pseq) <= lo:
                 continue
-            if cf >= len(poses_court[pid]):
-                continue
-            pose = poses_court[pid][cf]
-            for widx in WRIST:
-                w = pose[widx]
-                if np.any(np.isnan(w)):
-                    continue
-                d = np.linalg.norm(w - shuttle_court[cf])
-                if d < best_d:
-                    best_d, best = d, pid
+            sub = pseq[lo:hi]
+            target = None if shuttle_court is None else shuttle_court[cf]
+            for pose in sub:
+                for widx in WRIST:
+                    w = pose[widx]
+                    if np.any(np.isnan(w)):
+                        continue
+                    d = 0.0 if target is None else float(np.linalg.norm(w - target))
+                    if d < best_d:
+                        best_d, best = d, pid
         attrib.append(best)
     return attrib

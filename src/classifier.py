@@ -65,6 +65,22 @@ def _interp_pose(seq):
     return seq
 
 
+def _interp_stream(seq):
+    seq = seq.copy().astype(np.float64)
+    if seq.ndim == 1:
+        seq = seq.reshape(-1, 1)
+    out = seq.copy()
+    for c in range(seq.shape[1]):
+        col = seq[:, c]
+        if np.all(np.isnan(col)):
+            out[:, c] = 0.0
+        else:
+            idx = np.arange(len(col))
+            good = ~np.isnan(col)
+            out[:, c] = np.interp(idx, idx[good], col[good])
+    return out
+
+
 def extract_stroke_windows(court_poses, racket_traj, mbh_seq, contact_frames,
                             attrib, window=20, n_joints=17):
     samples = []
@@ -73,21 +89,25 @@ def extract_stroke_windows(court_poses, racket_traj, mbh_seq, contact_frames,
             continue
         if pid not in court_poses:
             continue
+        N = len(court_poses[pid])
         lo = max(0, cf - window // 2)
-        hi = min(len(court_poses[pid]), cf + window // 2 + 1)
+        hi = min(N, cf + window // 2 + 1)
         if hi - lo < 5:
             continue
         pseq = court_poses[pid][lo:hi]
         if np.any(np.isnan(pseq)):
             pseq = _interp_pose(pseq)
-        rseq = racket_traj.get(pid, np.zeros((len(court_poses[pid]), 2)))[lo:hi]
-        if np.any(np.isnan(rseq)) or len(rseq) == 0:
-            rseq = np.zeros((hi - lo, 2))
+        if np.any(np.isnan(pseq)):
+            continue
+        rseq = racket_traj.get(pid, np.zeros((N, 2)))[lo:hi]
+        rseq = _interp_stream(rseq)
         mseq = mbh_seq[lo:hi]
+        if mseq.ndim != 2:
+            mseq = np.zeros((hi - lo, 1))
         samples.append({
             "pose": normalize_pose_seq(pseq),
             "racket": np.nan_to_num(rseq),
-            "mbh": mseq if mseq.ndim == 2 else np.zeros((hi - lo, 1)),
+            "mbh": mseq,
             "contact": cf,
             "player": pid,
         })

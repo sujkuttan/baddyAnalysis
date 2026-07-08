@@ -3,30 +3,36 @@ import numpy as np
 from .config import COURT_WIDTH, COURT_LENGTH
 
 
-def _speed(pos, fps):
+def _speed(pos, fps, max_step=1.5):
     pos = np.array(pos, dtype=np.float64)
     v = np.full(len(pos), np.nan)
     if len(pos) < 2:
         return v
     dt = 1.0 / fps
     d = np.sqrt(np.sum((pos[1:] - pos[:-1]) ** 2, axis=1))
-    v[1:] = d / dt
+    step_ok = (~np.any(np.isnan(pos[1:]), axis=1)) & (~np.any(np.isnan(pos[:-1]), axis=1)) & (d <= max_step)
+    v[1:] = np.where(step_ok, d / dt, np.nan)
     v[0] = v[1]
     return v
 
 
-def compute_movement(positions, fps):
+def compute_movement(positions, fps, max_step=1.5):
     out = {}
     for pid, pos in positions.items():
         pos = np.array(pos, dtype=np.float64)
         valid = ~np.any(np.isnan(pos), axis=1)
-        speed = _speed(pos, fps)
-        total = np.nansum(np.sqrt(np.sum((pos[1:] - pos[:-1]) ** 2, axis=1))) if valid.sum() > 1 else 0.0
+        speed = _speed(pos, fps, max_step=max_step)
+        if valid.sum() > 1:
+            d = np.sqrt(np.sum((pos[1:] - pos[:-1]) ** 2, axis=1))
+            step_ok = (~np.any(np.isnan(pos[1:]), axis=1)) & (~np.any(np.isnan(pos[:-1]), axis=1)) & (d <= max_step)
+            total = float(np.nansum(np.where(step_ok, d, 0.0)))
+        else:
+            total = 0.0
         out[pid] = {
             "positions": pos,
             "valid": valid,
             "speed": speed,
-            "total_distance_m": float(total),
+            "total_distance_m": total,
             "mean_speed": float(np.nanmean(speed)) if valid.any() else 0.0,
             "max_speed": float(np.nanmax(speed)) if valid.any() else 0.0,
         }
@@ -62,11 +68,11 @@ def zone_coverage(positions, nz=3):
     return cov
 
 
-def fatigue_profile(positions, fps, window_sec=30.0):
+def fatigue_profile(positions, fps, window_sec=30.0, max_step=1.5):
     res = {}
     for pid, pos in positions.items():
         pos = np.array(pos, dtype=np.float64)
-        speed = _speed(pos, fps)
+        speed = _speed(pos, fps, max_step=max_step)
         valid = ~np.isnan(speed)
         speed = speed[valid]
         w = max(1, int(window_sec * fps))

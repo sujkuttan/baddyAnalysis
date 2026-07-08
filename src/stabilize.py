@@ -35,6 +35,7 @@ def init_stabilizer(corners0, n_per_side=6):
 def init_stabilizer_state(corners0, n_per_side=6):
     s = init_stabilizer(corners0, n_per_side)
     return {
+        "H0": s["H0"].copy(),
         "court_pts": s["court_pts"],
         "img_pts": s["img_pts"].astype(np.float32).copy(),
         "H_prev": s["H0"].copy(),
