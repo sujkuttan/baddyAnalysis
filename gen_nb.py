@@ -64,7 +64,10 @@ code('''import os, glob
 !unzip -o tracknet.zip -d weights/
 cands = glob.glob('weights/**/TrackNet*.pt', recursive=True)
 tracknet = cands[0] if cands else None
+icands = glob.glob('weights/**/Inpaint*.pt', recursive=True)
+inpaintnet = icands[0] if icands else None
 print('tracknet weights:', tracknet)
+print('inpaintnet weights:', inpaintnet)
 print('weights dir:', os.listdir('weights'))''')
 
 md('''## 5. Run the pipeline
@@ -92,7 +95,7 @@ print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES} ---')
 res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',
     labels_csv='labels_import.csv', device=device,
-    tracknet_weights=tracknet, batch_size=BATCH_SIZE,
+    tracknet_weights=tracknet, inpaintnet_weights=inpaintnet, batch_size=BATCH_SIZE,
     max_frames=SAMPLE_FRAMES, debug=True,
 )
 print('predictions:', res['predictions_csv'])

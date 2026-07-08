@@ -7,6 +7,7 @@ import torch
 
 from . import stabilize, pose as posemod, shuttle as shuttlemod, contact as contactmod
 from . import biomech, racket_bootstrap, movement, baseline, viz, llm_feedback, ab_eval
+from . import inpaintnet as inpaintmod
 from .config import STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH, validate_court_corners
 
 
@@ -19,9 +20,9 @@ def _wrist_stream(players, pid):
 
 
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
-                      device="cpu", tracknet_weights=None, use_mbh=False,
-                      llm_provider=None, llm_key=None, max_frames=None, batch_size=128,
-                      debug=False):
+                      device="cpu", tracknet_weights=None, inpaintnet_weights=None,
+                      use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
+                      batch_size=128, debug=False):
     import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
@@ -39,10 +40,12 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         print("WARNING: TrackNet weights NOT provided (tracknet_weights=None). "
               "Shuttle detection is disabled -> contacts=0 and stroke classification "
               "cannot run. Pass the trained TrackNet .pt weights to enable it.")
+    inpaintnet = inpaintmod.load_inpaintnet(inpaintnet_weights, device=device)
 
     Hs = []
     frames_all = []
     shuttle_img = []
+    frame_hw = None
     n_read = 0
     cap_max = max_frames if max_frames is not None else float("inf")
     while n_read < cap_max:
@@ -56,6 +59,8 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         if not batch:
             break
         for f in batch:
+            if frame_hw is None:
+                frame_hw = f.shape[:2]
             gray = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
             Hs.append(stabilize.stabilize_frame(state, gray))
         for f in batch:
@@ -73,10 +78,15 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     players = posemod.build_frame_players(frames_all, H0)
 
     print("[3/8] shuttle tracking + contact detection...")
+    shuttle_px = np.array(shuttle_img, dtype=np.float64)
+    if inpaintnet is not None and frame_hw is not None:
+        shuttle_px = inpaintmod.rectify_trajectory(
+            shuttle_px, frame_hw[1], frame_hw[0], inpaintnet, device=device, seq_len=16)
+        print("  InpaintNet: trajectory rectified (%d frames)" % len(shuttle_px))
     shuttle_court = np.full((len(Hs), 2), np.nan)
     for i in range(len(Hs)):
-        if i < len(shuttle_img) and not np.any(np.isnan(np.array(shuttle_img[i], dtype=np.float64))):
-            shuttle_court[i] = stabilize.warp_points(H0, np.array(shuttle_img[i], dtype=np.float64).reshape(1, 2))[0]
+        if i < len(shuttle_px) and not np.any(np.isnan(np.array(shuttle_px[i], dtype=np.float64))):
+            shuttle_court[i] = stabilize.warp_points(H0, np.array(shuttle_px[i], dtype=np.float64).reshape(1, 2))[0]
     # Mask shuttle detections outside the court (false positives / teleports).
     oob = ((shuttle_court[:, 0] < -0.5) | (shuttle_court[:, 0] > COURT_WIDTH + 0.5) |
            (shuttle_court[:, 1] < -0.5) | (shuttle_court[:, 1] > COURT_LENGTH + 0.5))
