@@ -93,7 +93,7 @@ res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',
     labels_csv='labels_import.csv', device=device,
     tracknet_weights=tracknet, batch_size=BATCH_SIZE,
-    max_frames=SAMPLE_FRAMES,
+    max_frames=SAMPLE_FRAMES, debug=True,
 )
 print('predictions:', res['predictions_csv'])
 print('metrics:', res['metrics'])''')

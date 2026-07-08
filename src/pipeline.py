@@ -20,7 +20,8 @@ def _wrist_stream(players, pid):
 
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                       device="cpu", tracknet_weights=None, use_mbh=False,
-                      llm_provider=None, llm_key=None, max_frames=None, batch_size=128):
+                      llm_provider=None, llm_key=None, max_frames=None, batch_size=128,
+                      debug=False):
     import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
@@ -70,6 +71,12 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         if i < len(shuttle_img) and not np.any(np.isnan(np.array(shuttle_img[i], dtype=np.float64))):
             shuttle_court[i] = stabilize.warp_points(Hs[i], np.array(shuttle_img[i], dtype=np.float64).reshape(1, 2))[0]
     contacts = contactmod.detect_contact_frames(shuttle_court, fps)
+    if debug:
+        cov = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
+        print(f"[debug] frames={len(Hs)} shuttle_nonnan={cov} "
+              f"({100*cov/max(len(Hs),1):.1f}%) contacts={len(contacts)}")
+        if contacts:
+            print("[debug] first contacts:", contacts[:20])
     attrib = biomech.attribute_contact(contacts, {p: players[p]["pose_court"] for p in players}, shuttle_court)
 
     print("[4/8] racket trajectories...")
@@ -87,7 +94,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         frame_to_shot = _label_frame_map(labels_csv)
         print("  training fusion classifier on labeled shots...")
         try:
-            trained = _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device)
+            trained = _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device, debug=debug)
             if trained is None:
                 print("  too few matching labeled shots; keeping geometry baseline predictions")
             else:
@@ -132,7 +139,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             "report": report_path}
 
 
-def _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device):
+def _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device, debug=False):
     from . import classifier as clfmod
     import csv as _csv
     gt = [r for r in _csv.DictReader(open(labels_csv)) if r.get("label_status") == "labeled"]
@@ -142,9 +149,18 @@ def _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs
             frame_to_label[int(float(g["frame"]))] = canonical_stroke(g["true_stroke"])
         except Exception:
             pass
+    if debug:
+        in_range = [f for f in frame_to_label if f < len(Hs)]
+        print(f"[debug] labeled_shots={len(frame_to_label)} in_processed_range={len(in_range)}")
+        print(f"[debug] stroke_windows(samples)={len(contacts)} contacts available")
     court_poses = {p: np.array(players[p]["pose_court"]) for p in players}
     mbh_dummy = np.zeros((len(Hs), 1))
     samples_all = clfmod.extract_stroke_windows(court_poses, racket_streams, mbh_dummy, contacts, attrib)
+    if debug:
+        def _matches(w):
+            return sum(1 for s in samples_all
+                       if any(f < len(Hs) and abs(f - s["contact"]) <= w for f in frame_to_label))
+        print(f"[debug] samples={len(samples_all)} matched@3={_matches(3)} matched@10={_matches(10)}")
     train, val = [], []
     for s in samples_all:
         near = min(frame_to_label.keys(), key=lambda k: abs(k - s["contact"])) if frame_to_label else None

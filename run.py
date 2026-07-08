@@ -17,7 +17,7 @@ def cmd_pipeline(args):
         args.video, corners, out_dir=args.out, labels_csv=args.labels,
         device=args.device, tracknet_weights=args.tracknet, use_mbh=args.mbh,
         llm_provider=args.llm_provider, llm_key=args.llm_key,
-        max_frames=args.max_frames, batch_size=args.batch_size,
+        max_frames=args.max_frames, batch_size=args.batch_size, debug=args.debug,
     )
 
 
@@ -40,6 +40,7 @@ def main():
     p.add_argument("--mbh", action="store_true")
     p.add_argument("--max_frames", type=int, default=None, help="limit frames (quick test)")
     p.add_argument("--batch_size", type=int, default=128, help="frames per batch")
+    p.add_argument("--debug", action="store_true", help="print shuttle/contact/label diagnostics")
     p.add_argument("--llm_provider", default=None)
     p.add_argument("--llm_key", default=None)
     p.set_defaults(func=cmd_pipeline)
