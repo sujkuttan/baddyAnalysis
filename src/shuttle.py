@@ -110,8 +110,10 @@ class TrackNetShuttle:
 
     def _preprocess(self, frames):
         # TrackNetV3: 9 consecutive RGB frames -> 27-channel input (9*3).
+        H, W = self.img_size
         arr = []
         for f in frames[-9:]:
+            f = cv2.resize(f, (W, H))
             im = cv2.cvtColor(f, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
             arr.append(im)
         while len(arr) < 9:
