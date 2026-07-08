@@ -52,6 +52,9 @@ class TrackNetShuttle:
             if len(matched) == 0:
                 print("WARNING: TrackNet checkpoint keys did NOT match the model architecture "
                       "-> model is UNTRAINED (random); shuttle detection will be wrong.")
+                print(f"  checkpoint top-level type: {type(ckpt).__name__}; "
+                      f"sd type: {type(sd).__name__}")
+                print(f"  checkpoint keys (first 40): {list(sd.keys())[:40]}")
             self.model.load_state_dict(sd, strict=False)
         else:
             print("WARNING: TrackNet model_path is None -> using an UNTRAINED random model.")
