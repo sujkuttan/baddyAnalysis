@@ -70,7 +70,12 @@ print('weights dir:', os.listdir('weights'))''')
 md('''## 5. Run the pipeline
 Processes the video in batches of `BATCH_SIZE` frames (default 128) so the full match
 runs within Colab's RAM. `SAMPLE_FRAMES` limits processing for a quick test; set to
-`None` for the entire video.''')
+`None` for the entire 5-min sample.
+
+**Frame budget (video is 30 fps):**
+- 900 frames ≈ 30 s (fast smoke test, no labels in range → baseline only)
+- ~3600 frames ≈ 120 s (covers all labeled shots → trains the fusion classifier)
+- `None` = full 5-min sample (≈9000 frames)''')
 code('''import torch, json
 from src import pipeline
 
@@ -80,10 +85,9 @@ print('using device:', device)
 corners = json.load(open('corners.json'))['corners']
 
 BATCH_SIZE = 128
-SAMPLE_FRAMES = 900  # ~15s at 60fps; set to None for the full video
-# NOTE: the 100 labeled shots are spread across the whole match, so the fusion
-# classifier only trains when labeled frames fall inside the processed range.
-# Use SAMPLE_FRAMES=None (full video) to include all labels and train the model.
+# 900 = ~30s smoke test. 3600 = ~120s (includes all labeled shots, trains classifier).
+# None = full 5-min sample. The 100 labels are on the first ~120s of this sample.
+SAMPLE_FRAMES = 3600
 print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES} ---')
 res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',
