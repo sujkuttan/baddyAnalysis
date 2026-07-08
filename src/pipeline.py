@@ -3,6 +3,7 @@ import json
 import os
 
 import numpy as np
+import torch
 
 from . import stabilize, pose as posemod, shuttle as shuttlemod, contact as contactmod
 from . import biomech, racket_bootstrap, movement, baseline, viz, llm_feedback, ab_eval
@@ -21,6 +22,9 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                       device="cpu", tracknet_weights=None, use_mbh=False,
                       llm_provider=None, llm_key=None):
     os.makedirs(out_dir, exist_ok=True)
+    if str(device) == "cuda" and not torch.cuda.is_available():
+        print("CUDA not available, falling back to cpu")
+        device = "cpu"
     print("[1/8] stabilizing camera (per-frame homography)...")
     st = stabilize.stabilize_video(video, corners)
     Hs, fps = st["homographies"], st["fps"]
