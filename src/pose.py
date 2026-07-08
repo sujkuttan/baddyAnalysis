@@ -64,3 +64,30 @@ def collect_player_streams(frames, Hs):
             players[pid]["foot_img"].append(fp)
             players[pid]["foot_court"].append(warp_points(H, fp.reshape(1, 2))[0])
     return players
+
+
+def load_pose_model(pose_model="yolov8s-pose.pt", device="cpu"):
+    from ultralytics import YOLO
+    return YOLO(pose_model)
+
+
+def parse_detections(result):
+    dets = []
+    if result is None:
+        return dets
+    boxes = result.boxes
+    kpts = result.keypoints if result.keypoints is not None else None
+    for i in range(len(boxes)):
+        xyxy = boxes.xyxy[i].cpu().numpy()
+        tid = int(boxes.id[i].item()) if boxes.id is not None else i
+        kp = kpts.xy[i].cpu().numpy() if kpts is not None else np.full((17, 2), np.nan)
+        dets.append({"id": tid, "bbox": xyxy, "keypoints": kp})
+    return dets
+
+
+def track_frame(model, frame, device="cpu", tracker="bytetrack.yaml"):
+    results = model.track(frame, tracker=tracker, persist=True, device=device,
+                          verbose=False, classes=0)
+    if isinstance(results, (list, tuple)):
+        results = results[0]
+    return parse_detections(results)

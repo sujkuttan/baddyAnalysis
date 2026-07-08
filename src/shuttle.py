@@ -80,3 +80,22 @@ class TrackNetShuttle:
             i += 1
         cap.release()
         return np.array(coords, dtype=np.float64)
+
+    def predict_frames(self, frames):
+        buf, coords = [], []
+        for f in frames:
+            buf.append(f)
+            if len(buf) >= 3:
+                with torch.no_grad():
+                    heat = self.model(self._preprocess(buf[-3:]))[0, 0].cpu().numpy()
+                mask = heat > self.vis_thresh
+                if mask.sum() > 0:
+                    ys, xs = np.where(mask)
+                    cx = float(xs.mean()) / self.img_size[1] * (buf[-1].shape[1])
+                    cy = float(ys.mean()) / self.img_size[0] * (buf[-1].shape[0])
+                    coords.append([cx, cy])
+                else:
+                    coords.append([np.nan, np.nan])
+        while len(coords) < len(frames):
+            coords.append([np.nan, np.nan])
+        return np.array(coords, dtype=np.float64)

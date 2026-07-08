@@ -20,29 +20,56 @@ def _wrist_stream(players, pid):
 
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                       device="cpu", tracknet_weights=None, use_mbh=False,
-                      llm_provider=None, llm_key=None, max_frames=None):
+                      llm_provider=None, llm_key=None, max_frames=None, batch_size=128):
+    import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
         print("CUDA not available, falling back to cpu")
         device = "cpu"
-    print("[1/8] stabilizing camera (per-frame homography)...")
-    st = stabilize.stabilize_video(video, corners, max_frames=max_frames)
-    Hs, fps = st["homographies"], st["fps"]
+    cap = cv2.VideoCapture(video)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    print("[1-2/8] batched stabilize + track + pose (batch_size=%d)..." % batch_size)
+    state = stabilize.init_stabilizer_state(corners)
+    model = posemod.load_pose_model("yolov8s-pose.pt", device=device)
+    tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device) if tracknet_weights else None
 
-    print("[2/8] tracking + pose...")
-    frames, _ = posemod.track_and_pose(video, device=device, max_frames=max_frames)
-    players = posemod.collect_player_streams(frames, Hs)
+    Hs = []
+    frames_all = []
+    shuttle_img = []
+    n_read = 0
+    while True:
+        batch = []
+        while len(batch) < batch_size:
+            ret, f = cap.read()
+            if not ret:
+                break
+            batch.append(f)
+            n_read += 1
+            if max_frames is not None and n_read >= max_frames:
+                break
+        if not batch:
+            break
+        for f in batch:
+            gray = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
+            Hs.append(stabilize.stabilize_frame(state, gray))
+        for f in batch:
+            frames_all.append(posemod.track_frame(model, f, device=device))
+        if tracknet is not None:
+            shuttle_img.extend(tracknet.predict_frames(batch))
+        else:
+            shuttle_img.extend([[np.nan, np.nan]] * len(batch))
+        del batch
+    cap.release()
+    Hs = np.array(Hs)
+    print("  processed %d frames" % len(Hs))
+
+    players = posemod.collect_player_streams(frames_all, Hs)
 
     print("[3/8] shuttle tracking + contact detection...")
     shuttle_court = np.full((len(Hs), 2), np.nan)
-    try:
-        sh = shuttlemod.TrackNetShuttle(tracknet_weights, device=device)
-        shuttle_img = sh.predict_video(video)
-        for i in range(min(len(shuttle_img), len(Hs))):
-            if not np.any(np.isnan(shuttle_img[i])):
-                shuttle_court[i] = stabilize.warp_points(Hs[i], shuttle_img[i].reshape(1, 2))[0]
-    except Exception as e:
-        print("  shuttle tracking skipped:", e)
+    for i in range(len(Hs)):
+        if i < len(shuttle_img) and not np.any(np.isnan(np.array(shuttle_img[i], dtype=np.float64))):
+            shuttle_court[i] = stabilize.warp_points(Hs[i], np.array(shuttle_img[i], dtype=np.float64).reshape(1, 2))[0]
     contacts = contactmod.detect_contact_frames(shuttle_court, fps)
     attrib = biomech.attribute_contact(contacts, {p: players[p]["pose_court"] for p in players}, shuttle_court)
 
@@ -85,7 +112,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     print("[7/8] visualization...")
     viz.plot_heatmap(hm, os.path.join(out_dir, "coverage_heatmap.png"))
     viz.plot_fatigue(fat, os.path.join(out_dir, "fatigue.png"))
-    viz.draw_annotated_video(video, frames, Hs, shuttle_court, contacts, attrib, preds,
+    viz.draw_annotated_video(video, frames_all, Hs, shuttle_court, contacts, attrib, preds,
                              os.path.join(out_dir, "annotated.mp4"))
 
     print("[8/8] report...")

@@ -32,6 +32,40 @@ def init_stabilizer(corners0, n_per_side=6):
     }
 
 
+def init_stabilizer_state(corners0, n_per_side=6):
+    s = init_stabilizer(corners0, n_per_side)
+    return {
+        "court_pts": s["court_pts"],
+        "img_pts": s["img_pts"].astype(np.float32).copy(),
+        "H_prev": s["H0"].copy(),
+        "prev_gray": None,
+    }
+
+
+def stabilize_frame(state, gray):
+    court_pts = state["court_pts"]
+    if state["prev_gray"] is None:
+        state["prev_gray"] = gray
+        return state["H_prev"].copy()
+    nxt, st = _lk_track(state["prev_gray"], gray, state["img_pts"])
+    good_mask = (st.reshape(-1) == 1)
+    nxt_pts = nxt.reshape(-1, 2)
+    n_good = int(good_mask.sum())
+    if n_good >= max(6, int(0.4 * len(court_pts))):
+        nxt_good = nxt_pts[good_mask]
+        court_good = court_pts[good_mask]
+        H, _ = cv2.findHomography(
+            nxt_good.reshape(-1, 1, 2),
+            court_good.reshape(-1, 1, 2),
+            cv2.RANSAC, 4.0,
+        )
+        if H is not None:
+            state["H_prev"] = H
+    state["img_pts"] = np.where(good_mask[:, None], nxt_pts, state["img_pts"]).astype(np.float32)
+    state["prev_gray"] = gray
+    return state["H_prev"].copy()
+
+
 def _lk_track(prev_gray, gray, pts):
     if prev_gray is None or pts is None or len(pts) == 0:
         return pts, np.zeros((len(pts), 1), dtype=np.uint8)
