@@ -20,17 +20,17 @@ def _wrist_stream(players, pid):
 
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                       device="cpu", tracknet_weights=None, use_mbh=False,
-                      llm_provider=None, llm_key=None):
+                      llm_provider=None, llm_key=None, max_frames=None):
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
         print("CUDA not available, falling back to cpu")
         device = "cpu"
     print("[1/8] stabilizing camera (per-frame homography)...")
-    st = stabilize.stabilize_video(video, corners)
+    st = stabilize.stabilize_video(video, corners, max_frames=max_frames)
     Hs, fps = st["homographies"], st["fps"]
 
     print("[2/8] tracking + pose...")
-    frames, _ = posemod.track_and_pose(video, device=device)
+    frames, _ = posemod.track_and_pose(video, device=device, max_frames=max_frames)
     players = posemod.collect_player_streams(frames, Hs)
 
     print("[3/8] shuttle tracking + contact detection...")

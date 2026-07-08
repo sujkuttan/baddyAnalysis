@@ -3,7 +3,7 @@ import numpy as np
 
 
 def track_and_pose(video_path, pose_model="yolov8s-pose.pt", tracker="bytetrack.yaml",
-                   device="cpu", sample_every=1):
+                   device="cpu", sample_every=1, max_frames=None):
     from ultralytics import YOLO
     model = YOLO(pose_model)
     cap = cv2.VideoCapture(video_path)
@@ -20,6 +20,8 @@ def track_and_pose(video_path, pose_model="yolov8s-pose.pt", tracker="bytetrack.
         if fi % sample_every != 0:
             fi += 1
             continue
+        if max_frames is not None and len(frames) >= max_frames:
+            break
         dets = []
         boxes = r.boxes
         kpts = r.keypoints if r.keypoints is not None else None
