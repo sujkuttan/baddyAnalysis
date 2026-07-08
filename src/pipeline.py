@@ -100,6 +100,8 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             else:
                 preds = trained
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print("  classifier training failed, using baseline:", e)
 
     _write_predictions(out_dir, contacts, attrib, preds, frame_to_shot)

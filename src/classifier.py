@@ -4,18 +4,19 @@ import torch.nn as nn
 
 
 def normalize_pose_seq(pose_seq_court):
+    # pose_seq_court: (T, 17, 2) joint-major, or a single (17, 2) frame
     pose_seq_court = np.array(pose_seq_court, dtype=np.float64)
     if pose_seq_court.ndim == 2:
-        pose_seq_court = pose_seq_court.reshape(1, -1, 17, 2)
+        pose_seq_court = pose_seq_court[None]
     out = []
-    for seq in pose_seq_court:
-        hip = (seq[:, 11] + seq[:, 12]) / 2.0
-        torso = np.linalg.norm(seq[:, 5] - seq[:, 11], axis=1)
-        torso[torso < 1e-3] = 1.0
-        n = seq - hip[:, None, :]
-        n = n / torso[:, None, None]
-        out.append(n.reshape(len(seq), -1))
-    return np.array(out, dtype=np.float64)
+    for seq in pose_seq_court:  # seq is (17, 2): rows = joints, cols = x/y
+        hip = (seq[11] + seq[12]) / 2.0            # (2,)
+        torso = float(np.linalg.norm(seq[5] - seq[11]))
+        if torso < 1e-3:
+            torso = 1.0
+        n = (seq - hip) / torso                     # (17, 2)
+        out.append(n.reshape(-1))                   # (34,)
+    return np.array(out, dtype=np.float64)          # (T, 34)
 
 
 class StreamEncoder(nn.Module):
@@ -84,7 +85,7 @@ def extract_stroke_windows(court_poses, racket_traj, mbh_seq, contact_frames,
             rseq = np.zeros((hi - lo, 2))
         mseq = mbh_seq[lo:hi]
         samples.append({
-            "pose": normalize_pose_seq(pseq)[0],
+            "pose": normalize_pose_seq(pseq),
             "racket": np.nan_to_num(rseq),
             "mbh": mseq if mseq.ndim == 2 else np.zeros((hi - lo, 1)),
             "contact": cf,
