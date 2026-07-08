@@ -83,10 +83,15 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         contacts = contactmod.detect_contact_frames(shuttle_court, fps, angle_thresh_deg=50.0, min_speed=1.0)
     cov = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     spd = np.linalg.norm(contactmod.shuttle_speed(shuttle_court, fps), axis=1)
+    shi = np.array(shuttle_img, dtype=np.float64)
     print(f"[shuttle] frames={len(Hs)} shuttle_nonnan={cov} "
           f"({100*cov/max(len(Hs),1):.1f}%) contacts={len(contacts)} "
           f"speed_m/s min={np.nanmin(spd):.2f} med={np.nanmedian(spd):.2f} "
           f"max={np.nanmax(spd):.2f} frac>1m/s={100*float(np.nanmean(spd > 1.0)):.1f}%")
+    print(f"[shuttle] raw_img x[{np.nanmin(shi[:, 0]):.0f},{np.nanmax(shi[:, 0]):.0f}] "
+          f"y[{np.nanmin(shi[:, 1]):.0f},{np.nanmax(shi[:, 1]):.0f}] "
+          f"court x[{np.nanmin(shuttle_court[:, 0]):.2f},{np.nanmax(shuttle_court[:, 0]):.2f}] "
+          f"y[{np.nanmin(shuttle_court[:, 1]):.2f},{np.nanmax(shuttle_court[:, 1]):.2f}]")
     if debug and contacts:
         print("[debug] first contacts:", contacts[:20])
     if len(contacts) == 0:

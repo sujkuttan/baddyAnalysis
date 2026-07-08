@@ -44,7 +44,17 @@ class TrackNetShuttle:
             sd = ckpt.get("model" if isinstance(ckpt, dict) else "state_dict", ckpt)
             if isinstance(sd, dict) and any(k.startswith("module.") for k in sd):
                 sd = {k.replace("module.", ""): v for k, v in sd.items()}
+            model_keys = set(self.model.state_dict().keys())
+            sd_keys = set(sd.keys()) if isinstance(sd, dict) else set()
+            matched = model_keys & sd_keys
+            print(f"TrackNet: loaded {len(matched)}/{len(model_keys)} param tensors "
+                  f"from {model_path}")
+            if len(matched) == 0:
+                print("WARNING: TrackNet checkpoint keys did NOT match the model architecture "
+                      "-> model is UNTRAINED (random); shuttle detection will be wrong.")
             self.model.load_state_dict(sd, strict=False)
+        else:
+            print("WARNING: TrackNet model_path is None -> using an UNTRAINED random model.")
         self.model.to(device).eval()
 
     def _preprocess(self, frames):
