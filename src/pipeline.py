@@ -35,6 +35,10 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     H0 = state["H0"]
     model = posemod.load_pose_model("yolov8s-pose.pt", device=device)
     tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device) if tracknet_weights else None
+    if tracknet is None:
+        print("WARNING: TrackNet weights NOT provided (tracknet_weights=None). "
+              "Shuttle detection is disabled -> contacts=0 and stroke classification "
+              "cannot run. Pass the trained TrackNet .pt weights to enable it.")
 
     Hs = []
     frames_all = []
@@ -74,12 +78,13 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         if i < len(shuttle_img) and not np.any(np.isnan(np.array(shuttle_img[i], dtype=np.float64))):
             shuttle_court[i] = stabilize.warp_points(H0, np.array(shuttle_img[i], dtype=np.float64).reshape(1, 2))[0]
     contacts = contactmod.detect_contact_frames(shuttle_court, fps, angle_thresh_deg=50.0, min_speed=1.0)
-    if debug:
-        cov = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
-        print(f"[debug] frames={len(Hs)} shuttle_nonnan={cov} "
-              f"({100*cov/max(len(Hs),1):.1f}%) contacts={len(contacts)}")
-        if contacts:
-            print("[debug] first contacts:", contacts[:20])
+    cov = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
+    print(f"[shuttle] frames={len(Hs)} shuttle_nonnan={cov} "
+          f"({100*cov/max(len(Hs),1):.1f}%) contacts={len(contacts)}")
+    if debug and contacts:
+        print("[debug] first contacts:", contacts[:20])
+    if len(contacts) == 0:
+        print("WARNING: 0 shuttle contacts detected. Check TrackNet weights and shuttle coverage.")
     attrib = biomech.attribute_contact(contacts, {p: players[p]["pose_court"] for p in players}, shuttle_court)
 
     print("[4/8] racket trajectories...")

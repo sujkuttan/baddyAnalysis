@@ -112,7 +112,9 @@ def build_frame_players(frames_all, H, K=None, foot_thresh=1.5, min_track_frac=0
 
     tracks.sort(key=lambda t: len(t["frames"]), reverse=True)
     if K is None:
-        keep = [t for t in tracks if len(t["frames"]) >= max(10, int(min_track_frac * N))]
+        maxc = max((len(t["frames"]) for t in tracks), default=0)
+        keep = [t for t in tracks if len(t["frames"]) >= max(10, 0.3 * maxc)]
+        keep = keep[:6]
         if len(keep) < 2:
             keep = tracks[:2]
     else:

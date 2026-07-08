@@ -37,6 +37,7 @@ class TrackNetShuttle:
         self.device = device
         self.vis_thresh = vis_thresh
         self.img_size = img_size
+        self._buf = []
         self.model = TrackNet(in_channels=3)
         if model_path is not None:
             ckpt = torch.load(model_path, map_location="cpu")
@@ -82,17 +83,17 @@ class TrackNetShuttle:
         return np.array(coords, dtype=np.float64)
 
     def predict_frames(self, frames):
-        buf, coords = [], []
+        coords = []
         for f in frames:
-            buf.append(f)
-            if len(buf) >= 3:
+            self._buf.append(f)
+            if len(self._buf) >= 3:
                 with torch.no_grad():
-                    heat = self.model(self._preprocess(buf[-3:]))[0, 0].cpu().numpy()
+                    heat = self.model(self._preprocess(self._buf[-3:]))[0, 0].cpu().numpy()
                 mask = heat > self.vis_thresh
                 if mask.sum() > 0:
                     ys, xs = np.where(mask)
-                    cx = float(xs.mean()) / self.img_size[1] * (buf[-1].shape[1])
-                    cy = float(ys.mean()) / self.img_size[0] * (buf[-1].shape[0])
+                    cx = float(xs.mean()) / self.img_size[1] * (self._buf[-1].shape[1])
+                    cy = float(ys.mean()) / self.img_size[0] * (self._buf[-1].shape[0])
                     coords.append([cx, cy])
                 else:
                     coords.append([np.nan, np.nan])
