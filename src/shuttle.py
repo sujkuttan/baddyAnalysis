@@ -35,12 +35,15 @@ class _DownBlock(nn.Module):
 class _UpBlock(nn.Module):
     def __init__(self, concat_ch, out_c, n_convs):
         super().__init__()
-        setattr(self, "conv_1", _ConvBlock(concat_ch, out_c, stride=2, transpose=True))
+        self.n_convs = n_convs
+        self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
+        setattr(self, "conv_1", _ConvBlock(concat_ch, out_c, stride=1))
         for i in range(2, n_convs + 1):
             setattr(self, f"conv_{i}", _ConvBlock(out_c, out_c, stride=1))
 
     def forward(self, x):
-        for i in range(1, len(self._modules) + 1):
+        x = self.upsample(x)
+        for i in range(1, self.n_convs + 1):
             x = getattr(self, f"conv_{i}")(x)
         return x
 
