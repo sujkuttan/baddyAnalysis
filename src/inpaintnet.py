@@ -37,7 +37,7 @@ class InpaintNet(nn.Module):
         self.down_1 = _Conv1DBlock(3, 32)
         self.down_2 = _Conv1DBlock(32, 64)
         self.down_3 = _Conv1DBlock(64, 128)
-        self.buttleneck = _Double1DConv(128, 256)
+        self.buttelneck = _Double1DConv(128, 256)
         self.up_1 = _Conv1DBlock(384, 128)
         self.up_2 = _Conv1DBlock(192, 64)
         self.up_3 = _Conv1DBlock(96, 32)
@@ -50,7 +50,7 @@ class InpaintNet(nn.Module):
         x1 = self.down_1(x)                         # (N, 32, L)
         x2 = self.down_2(x1)                        # (N, 64, L)
         x3 = self.down_3(x2)                        # (N, 128, L)
-        x = self.buttleneck(x3)                     # (N, 256, L)
+        x = self.buttelneck(x3)                    # (N, 256, L)
         x = torch.cat([x, x3], dim=1)               # (N, 384, L)
         x = self.up_1(x)                            # (N, 128, L)
         x = torch.cat([x, x2], dim=1)               # (N, 192, L)
@@ -73,6 +73,16 @@ def load_inpaintnet(path, device="cpu"):
         return None
     if isinstance(sd, dict) and "model_state_dict" in sd:
         sd = sd["model_state_dict"]
+    if isinstance(sd, dict) and "model" in sd:
+        sd = sd["model"]
+    if isinstance(sd, dict) and "state_dict" in sd:
+        sd = sd["state_dict"]
+    if not isinstance(sd, dict):
+        print("WARNING: InpaintNet weights not a state_dict; skipping rectification.")
+        return None
+    # Strip DataParallel prefix and normalize the 'buttelneck'/'buttleneck' token.
+    sd = {k.replace("module.", ""): v for k, v in sd.items()}
+    sd = {k.replace("buttleneck", "buttelneck"): v for k, v in sd.items()}
     model = InpaintNet().to(device)
     cur = model.state_dict()
     matched = set(sd.keys()) & set(cur.keys())
