@@ -116,13 +116,13 @@ def _fill_nan(a):
     return a
 
 
-def rectify_trajectory(coords_px, W, H, model, device="cpu", seq_len=16,
-                       max_jump=0.25, sigma=None):
-    """Repair missing/outlier shuttle detections using InpaintNet.
+def rectify_trajectory(coords_px, W, H, model, device="cpu", seq_len=16, sigma=None):
+    """Repair missing shuttle detections using InpaintNet.
 
     coords_px: (N, 2) pixel coords, np.nan where TrackNet missed.
     W, H:      original frame size (coords normalized to [0, 1] for the model).
-    Returns repaired (N, 2) pixel coords.
+    Returns repaired (N, 2) pixel coords. Only genuine misses are replaced;
+    detected points are always kept (repaired = coor*(1-mask)).
     """
     coords = np.array(coords_px, dtype=np.float64)
     N = len(coords)
@@ -131,22 +131,13 @@ def rectify_trajectory(coords_px, W, H, model, device="cpu", seq_len=16,
 
     norm = coords.copy()
     valid = ~np.isnan(norm).any(axis=1)
-    norm[~valid, 0] = 0.0
-    norm[~valid, 1] = 0.0
     norm[:, 0] = np.clip(norm[:, 0] / max(W, 1), 0.0, 1.0)
     norm[:, 1] = np.clip(norm[:, 1] / max(H, 1), 0.0, 1.0)
-
-    # Mask = frames to repair: TrackNet misses + teleport outliers.
-    mask = ~valid
-    for i in range(1, N):
-        if valid[i] and valid[i - 1]:
-            dx = norm[i, 0] - norm[i - 1, 0]
-            dy = norm[i, 1] - norm[i - 1, 1]
-            if np.hypot(dx, dy) > max_jump:
-                mask[i] = True
-                mask[i - 1] = True
-
+    norm[~valid] = np.nan
+    # Interpolate gaps so the model sees a continuous trajectory as input.
     filled = _fill_nan(norm)
+    mask = ~valid
+
     L = min(seq_len, N)
     if sigma is None:
         sigma = L / 2.0
