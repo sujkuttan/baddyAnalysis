@@ -7,7 +7,7 @@ import torch
 
 from . import stabilize, pose as posemod, shuttle as shuttlemod, contact as contactmod
 from . import biomech, racket_bootstrap, movement, baseline, viz, llm_feedback, ab_eval
-from .config import STROKE_TO_ID, canonical_stroke, COURT_LENGTH
+from .config import STROKE_TO_ID, canonical_stroke, COURT_LENGTH, validate_court_corners
 
 
 def _wrist_stream(players, pid):
@@ -30,6 +30,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     cap = cv2.VideoCapture(video)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     print("[1-2/8] batched stabilize + track + pose (batch_size=%d)..." % batch_size)
+    validate_court_corners(corners)
     state = stabilize.init_stabilizer_state(corners)
     H0 = state["H0"]
     model = posemod.load_pose_model("yolov8s-pose.pt", device=device)
