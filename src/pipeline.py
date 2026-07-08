@@ -79,23 +79,28 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
 
     print("[3/8] shuttle tracking + contact detection...")
     shuttle_px = np.array(shuttle_img, dtype=np.float64)
+    tracknet_valid = int(np.sum(~np.isnan(shuttle_px).any(axis=1)))
     if inpaintnet is not None and frame_hw is not None:
         shuttle_px = inpaintmod.rectify_trajectory(
             shuttle_px, frame_hw[1], frame_hw[0], inpaintnet, device=device, seq_len=16)
         print("  InpaintNet: trajectory rectified (%d frames)" % len(shuttle_px))
+    rectified_valid = int(np.sum(~np.isnan(shuttle_px).any(axis=1)))
     shuttle_court = np.full((len(Hs), 2), np.nan)
     for i in range(len(Hs)):
         if i < len(shuttle_px) and not np.any(np.isnan(np.array(shuttle_px[i], dtype=np.float64))):
             shuttle_court[i] = stabilize.warp_points(H0, np.array(shuttle_px[i], dtype=np.float64).reshape(1, 2))[0]
+    pre_oob = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     # Mask shuttle detections outside the court (false positives / teleports).
     oob = ((shuttle_court[:, 0] < -0.5) | (shuttle_court[:, 0] > COURT_WIDTH + 0.5) |
            (shuttle_court[:, 1] < -0.5) | (shuttle_court[:, 1] > COURT_LENGTH + 0.5))
     shuttle_court[oob] = np.nan
+    cov = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
+    print(f"[diag] tracknet_valid={tracknet_valid} rectified_valid={rectified_valid} "
+          f"pre_oob={pre_oob} oob_clipped={pre_oob - cov}")
     contacts = contactmod.detect_contacts_near_players(
         shuttle_court, {p: players[p]["pose_court"] for p in players}, fps, max_dist=2.0)
     if len(contacts) == 0:
         contacts = contactmod.detect_contact_frames(shuttle_court, fps, angle_thresh_deg=50.0, min_speed=1.0)
-    cov = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     spd = np.linalg.norm(contactmod.shuttle_speed(shuttle_court, fps), axis=1)
     shi = np.array(shuttle_img, dtype=np.float64)
     print(f"[shuttle] frames={len(Hs)} shuttle_nonnan={cov} "
