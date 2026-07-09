@@ -3,6 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from .contact import shuttle_speed
+
 
 class _ConvBlock(nn.Module):
     def __init__(self, in_c, out_c):
@@ -65,15 +67,15 @@ class TrackNet(nn.Module):
         return torch.sigmoid(self.predictor(x))
 
 
-def _predict_location(heatmap):
+def _predict_location(heatmap, thresh=0.5):
     """Reference `test.py`: largest connected-component bbox center.
 
-    heatmap: single-channel (H, W) float/uint8 (already thresholded >0.5).
+    heatmap: single-channel (H, W) float/uint8 (thresholded at `thresh`).
     Returns (cx, cy) in input-pixel space, or None if empty.
     """
     if heatmap is None or np.amax(heatmap) == 0:
         return None
-    h = (heatmap > 0.5).astype(np.uint8) if heatmap.dtype != np.uint8 else heatmap
+    h = (heatmap > thresh).astype(np.uint8) if heatmap.dtype != np.uint8 else heatmap
     cnts, _ = cv2.findContours(h, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not cnts:
         return None
@@ -91,10 +93,11 @@ class TrackNetShuttle:
     largest connected-component centroid per ensembled heatmap.
     """
 
-    def __init__(self, model_path=None, device="cuda", img_size=(288, 512), seq_len=8):
+    def __init__(self, model_path=None, device="cuda", img_size=(288, 512), seq_len=8, heat_thresh=0.5):
         self.device = device
         self.img_size = img_size
         self.seq_len = seq_len
+        self.heat_thresh = heat_thresh
         self._buf = []
         self.model = TrackNet(in_channels=(seq_len + 1) * 3, out_channels=seq_len)
         if model_path is not None:
@@ -220,7 +223,7 @@ class TrackNetShuttle:
             if wsum[i] == 0:
                 coords.append([np.nan, np.nan])
                 continue
-            c = _predict_location(accum[i] / wsum[i])
+            c = _predict_location(accum[i] / wsum[i], self.heat_thresh)
             if c is None:
                 coords.append([np.nan, np.nan])
             else:
@@ -258,3 +261,23 @@ class TrackNetShuttle:
             sum_arr = im.astype(np.float64) if sum_arr is None else sum_arr + im
         bg = (sum_arr / max(len(small), 1)).astype(np.uint8)
         return self._predict_from_small(small, bg, fw, fh)
+
+
+def cap_speed(shuttle, fps, max_mps=100.0, window=1):
+    """Null shuttle detections whose instantaneous speed exceeds `max_mps`.
+
+    Catches wild in-bounds *detections* (teleports) that the OOB clip misses.
+    A teleport inflates the speed at the jump frame and the frame after it, so
+    both are nulled to break the round trip. Returns a copy with those rows
+    set to np.nan.
+    """
+    shuttle = np.array(shuttle, dtype=np.float64).copy()
+    if len(shuttle) < 2:
+        return shuttle
+    v = shuttle_speed(shuttle, fps)
+    spd = np.linalg.norm(v, axis=1)
+    bad = np.where(spd > max_mps)[0]
+    for i in bad:
+        for j in range(i, min(i + window + 1, len(shuttle))):
+            shuttle[j] = np.nan
+    return shuttle

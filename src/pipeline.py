@@ -8,7 +8,9 @@ import torch
 from . import stabilize, pose as posemod, shuttle as shuttlemod, contact as contactmod
 from . import biomech, racket_bootstrap, movement, baseline, viz, llm_feedback, ab_eval
 from . import inpaintnet as inpaintmod
-from .config import STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH, validate_court_corners
+from .config import (STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH,
+                     validate_court_corners, OOB_MARGIN_M, MAX_SHUTTLE_SPEED_MPS,
+                     IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH)
 
 
 def _wrist_stream(players, pid):
@@ -35,7 +37,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     state = stabilize.init_stabilizer_state(corners)
     H0 = state["H0"]
     model = posemod.load_pose_model("yolov8s-pose.pt", device=device)
-    tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device) if tracknet_weights else None
+    tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device, heat_thresh=TRACKNET_HEAT_THRESH) if tracknet_weights else None
     if tracknet is None:
         print("WARNING: TrackNet weights NOT provided (tracknet_weights=None). "
               "Shuttle detection is disabled -> contacts=0 and stroke classification "
@@ -90,17 +92,32 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         if i < len(shuttle_px) and not np.any(np.isnan(np.array(shuttle_px[i], dtype=np.float64))):
             shuttle_court[i] = stabilize.warp_points(H0, np.array(shuttle_px[i], dtype=np.float64).reshape(1, 2))[0]
     pre_oob = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
-    # Mask shuttle detections outside the court (false positives / teleports).
-    oob = ((shuttle_court[:, 0] < -0.5) | (shuttle_court[:, 0] > COURT_WIDTH + 0.5) |
-           (shuttle_court[:, 1] < -0.5) | (shuttle_court[:, 1] > COURT_LENGTH + 0.5))
+    # Mask shuttle detections far outside the court (stands / teleports). The
+    # margin is kept generous so legitimately out-of-bounds shots survive.
+    oob = ((shuttle_court[:, 0] < -OOB_MARGIN_M) | (shuttle_court[:, 0] > COURT_WIDTH + OOB_MARGIN_M) |
+           (shuttle_court[:, 1] < -OOB_MARGIN_M) | (shuttle_court[:, 1] > COURT_LENGTH + OOB_MARGIN_M))
+    if debug and oob.any():
+        clx = shuttle_court[oob, 0]
+        cly = shuttle_court[oob, 1]
+        print(f"[diag] OOB extent: x[{np.nanmin(clx):.2f},{np.nanmax(clx):.2f}] "
+              f"y[{np.nanmin(cly):.2f},{np.nanmax(cly):.2f}] (margin={OOB_MARGIN_M})")
     shuttle_court[oob] = np.nan
+    oob_clipped = pre_oob - int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
+    # Filter wild in-bounds detections (teleports) the OOB box missed.
+    shuttle_court = shuttlemod.cap_speed(shuttle_court, fps, MAX_SHUTTLE_SPEED_MPS)
+    speed_clipped = (pre_oob - oob_clipped) - int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     cov = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     print(f"[diag] tracknet_valid={tracknet_valid} rectified_valid={rectified_valid} "
-          f"pre_oob={pre_oob} oob_clipped={pre_oob - cov}")
-    contacts = contactmod.detect_contacts_near_players(
-        shuttle_court, {p: players[p]["pose_court"] for p in players}, fps, max_dist=2.0)
-    if len(contacts) == 0:
-        contacts = contactmod.detect_contact_frames(shuttle_court, fps, angle_thresh_deg=50.0, min_speed=1.0)
+          f"pre_oob={pre_oob} oob_clipped={oob_clipped} speed_clipped={speed_clipped}")
+    contacts_near = contactmod.detect_contacts_near_players(
+        shuttle_court, {p: players[p]["pose_court"] for p in players}, fps, max_dist=2.5)
+    contacts_ang = contactmod.detect_contact_frames(
+        shuttle_court, fps, angle_thresh_deg=70.0, min_speed=4.0)
+    contacts_img = contactmod.detect_contacts_image_space(
+        shuttle_px, {p: players[p]["pose_img"] for p in players},
+        fps, max_dist_px=IMAGE_CONTACT_MAX_DIST_PX)
+    contacts = contactmod.merge_contacts(
+        contacts_near, contacts_ang, contacts_img, min_gap=0.3, fps=fps)
     spd = np.linalg.norm(contactmod.shuttle_speed(shuttle_court, fps), axis=1)
     shi = np.array(shuttle_img, dtype=np.float64)
     print(f"[shuttle] frames={len(Hs)} shuttle_nonnan={cov} "
@@ -130,7 +147,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         frame_to_shot = _label_frame_map(labels_csv)
         print("  training fusion classifier on labeled shots...")
         try:
-            trained = _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device, debug=debug)
+            trained = _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device, debug=debug, shuttle_court=shuttle_court)
             if trained is None:
                 print("  too few matching labeled shots; keeping geometry baseline predictions")
             else:
@@ -177,7 +194,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             "report": report_path}
 
 
-def _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device, debug=False):
+def _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device, debug=False, shuttle_court=None):
     from . import classifier as clfmod
     import csv as _csv
     gt = [r for r in _csv.DictReader(open(labels_csv)) if r.get("label_status") == "labeled"]
@@ -191,6 +208,19 @@ def _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs
         in_range = [f for f in frame_to_label if f < len(Hs)]
         print(f"[debug] labeled_shots={len(frame_to_label)} in_processed_range={len(in_range)}")
         print(f"[debug] contacts(detected)={len(contacts)}")
+        # Localize why each in-range labeled shot may be unmatched.
+        for f in sorted(in_range):
+            nearest = min((abs(f - c) for c in contacts), default=None)
+            if shuttle_court is not None and f < len(shuttle_court):
+                shut_valid = not bool(np.any(np.isnan(np.array(shuttle_court[f], dtype=np.float64))))
+            else:
+                shut_valid = None
+            pose_valid = any(
+                f < len(players[p]["pose_img"]) and
+                not bool(np.any(np.isnan(np.array(players[p]["pose_img"][f], dtype=np.float64))))
+                for p in players)
+            print(f"[debug] labeled f={f:4d} nearest_contact={nearest} "
+                  f"shuttle_valid={shut_valid} pose_valid={pose_valid}")
     court_poses = {p: players[p]["pose_court"] for p in players}
     mbh_dummy = np.zeros((len(Hs), 1))
     MATCH_WINDOW = 15

@@ -3,6 +3,25 @@ import numpy as np
 COURT_WIDTH = 6.1
 COURT_LENGTH = 13.4
 
+# Geometric clip margin for warped shuttle coords: points further than this
+# outside the court lines are treated as false positives (stands / teleports).
+# Kept generous so legitimately out-of-bounds shots are not discarded.
+OOB_MARGIN_M = 2.0
+
+# Hard cap on instantaneous shuttle speed (m/s). Detections above this are
+# treated as wild in-bounds teleports and nulled before contact detection.
+MAX_SHUTTLE_SPEED_MPS = 100.0
+
+# Contact cue in image space: max shuttle->wrist pixel distance to count as a
+# hit. Avoids the court-homography extrapolation that pushes aerial shuttles
+# off-court (and so misses real hits). Tune to frame resolution.
+IMAGE_CONTACT_MAX_DIST_PX = 80.0
+
+# TrackNet decode heatmap threshold. Lower = more (incl. low-confidence) shuttle
+# detections, at the cost of more false positives. Tuned down from 0.5 to recover
+# shuttle detections at hit instants that otherwise get missed.
+TRACKNET_HEAT_THRESH = 0.4
+
 COURT_CORNERS_METERS = np.array(
     [
         [0.0, 0.0],
