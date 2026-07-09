@@ -15,7 +15,7 @@ MAX_SHUTTLE_SPEED_MPS = 100.0
 # Contact cue in image space: max shuttle->wrist pixel distance to count as a
 # hit. Avoids the court-homography extrapolation that pushes aerial shuttles
 # off-court (and so misses real hits). Tune to frame resolution.
-IMAGE_CONTACT_MAX_DIST_PX = 80.0
+IMAGE_CONTACT_MAX_DIST_PX = 60.0
 
 # TrackNet decode heatmap threshold. Lower = more (incl. low-confidence) shuttle
 # detections, at the cost of more false positives. Tuned down from 0.5 to recover

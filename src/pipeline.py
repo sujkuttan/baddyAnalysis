@@ -117,7 +117,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         shuttle_px, {p: players[p]["pose_img"] for p in players},
         fps, max_dist_px=IMAGE_CONTACT_MAX_DIST_PX)
     contacts = contactmod.merge_contacts(
-        contacts_near, contacts_ang, contacts_img, min_gap=0.3, fps=fps)
+        contacts_near, contacts_ang, contacts_img, min_gap=0.35, fps=fps)
     spd = np.linalg.norm(contactmod.shuttle_speed(shuttle_court, fps), axis=1)
     shi = np.array(shuttle_img, dtype=np.float64)
     print(f"[shuttle] frames={len(Hs)} shuttle_nonnan={cov} "
