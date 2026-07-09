@@ -71,9 +71,11 @@ print('inpaintnet weights:', inpaintnet)
 print('weights dir:', os.listdir('weights'))''')
 
 md('''## 5. Run the pipeline
-Processes the video in batches of `BATCH_SIZE` frames (default 128) so the full match
-runs within Colab's RAM. `SAMPLE_FRAMES` limits processing for a quick test; set to
-`None` for the entire 5-min sample.
+Processes the video in batches of `BATCH_SIZE` frames (default 64 on T4) so the full
+match runs within Colab's RAM. TrackNet's internal `chunk=8` is the main GPU-memory
+knob; if Colab CUDA OOMs, lower TrackNet's internal chunk from 8 to 4 in
+`src/shuttle.py`. `SAMPLE_FRAMES` limits processing for a quick test; set to `None`
+for the entire 5-min sample.
 
 **Frame budget (video is 30 fps):**
 - 900 frames ≈ 30 s (fast smoke test, no labels in range → baseline only)
@@ -87,7 +89,7 @@ print('using device:', device)
 
 corners = json.load(open('corners.json'))['corners']
 
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 # 900 = ~30s smoke test. 3600 = ~120s (includes all labeled shots, trains classifier).
 # None = full 5-min sample. The 100 labels are on the first ~120s of this sample.
 SAMPLE_FRAMES = 3600

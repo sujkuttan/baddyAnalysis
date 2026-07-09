@@ -3,16 +3,20 @@ import json
 import os
 
 from src import pipeline
+from src import shuttle as shuttlemod
+from src import inpaintnet as inpaintmod
 from src.config import remap_corners, validate_court_corners, CORNER_ORDER_CANON
 
 
 def load_corners(path, order):
     if path.endswith(".json"):
-        data = json.load(open(path))
+        with open(path) as f:
+            data = json.load(f)
         pts = data["corners"]
         order = data.get("order", order)
     else:
-        pts = json.load(open(path))
+        with open(path) as f:
+            pts = json.load(f)
     pts = remap_corners(pts, order)
     validate_court_corners(pts)
     return pts
@@ -22,7 +26,8 @@ def cmd_pipeline(args):
     corners = load_corners(args.corners, args.corners_order)
     pipeline.run_full_pipeline(
         args.video, corners, out_dir=args.out, labels_csv=args.labels,
-        device=args.device, tracknet_weights=args.tracknet, use_mbh=args.mbh,
+        device=args.device, tracknet_weights=args.tracknet,
+        inpaintnet_weights=args.inpaintnet, use_mbh=args.mbh,
         llm_provider=args.llm_provider, llm_key=args.llm_key,
         max_frames=args.max_frames, batch_size=args.batch_size, debug=args.debug,
     )
@@ -31,6 +36,53 @@ def cmd_pipeline(args):
 def cmd_ab(args):
     res = pipeline.ab_compare(args.labels, args.new, args.bst)
     print("BST:", res["bst"]["accuracy"], "NEW:", res["new"]["accuracy"])
+
+
+def cmd_shuttle_smoke(args):
+    import cv2
+    import numpy as np
+    import torch
+
+    device = args.device
+    if str(device) == "cuda" and not torch.cuda.is_available():
+        print("CUDA not available, falling back to cpu")
+        device = "cpu"
+
+    tracker = shuttlemod.TrackNetShuttle(args.tracknet, device=device)
+    inpainter = inpaintmod.load_inpaintnet(args.inpaintnet, device=device)
+
+    cap = cv2.VideoCapture(args.video)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_hw = None
+    coords = []
+    n_read = 0
+    cap_max = args.max_frames if args.max_frames is not None else float("inf")
+    while n_read < cap_max:
+        batch = []
+        while len(batch) < args.batch_size and n_read < cap_max:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_hw is None:
+                frame_hw = frame.shape[:2]
+            batch.append(frame)
+            n_read += 1
+        if not batch:
+            break
+        coords.extend(tracker.predict_frames(batch))
+    cap.release()
+
+    coords = np.array(coords, dtype=np.float64)
+    valid = int(np.sum(~np.isnan(coords).any(axis=1))) if len(coords) else 0
+    print(f"[shuttle-smoke] frames={len(coords)} fps={fps:.2f} "
+          f"tracknet_valid={valid} ({100*valid/max(len(coords),1):.1f}%)")
+
+    if inpainter is not None and frame_hw is not None:
+        repaired = inpaintmod.rectify_trajectory(
+            coords, frame_hw[1], frame_hw[0], inpainter, device=device, seq_len=args.seq_len)
+        repaired_valid = int(np.sum(~np.isnan(repaired).any(axis=1))) if len(repaired) else 0
+        print(f"[shuttle-smoke] inpaint_valid={repaired_valid} "
+              f"({100*repaired_valid/max(len(repaired),1):.1f}%)")
 
 
 def main():
@@ -48,6 +100,7 @@ def main():
     p.add_argument("--labels", default="labels_import.csv")
     p.add_argument("--device", default="cpu")
     p.add_argument("--tracknet", default=None)
+    p.add_argument("--inpaintnet", default=None)
     p.add_argument("--mbh", action="store_true")
     p.add_argument("--max_frames", type=int, default=None, help="limit frames (quick test)")
     p.add_argument("--batch_size", type=int, default=128, help="frames per batch")
@@ -61,6 +114,18 @@ def main():
     a.add_argument("--new", default="data/new_predictions.csv")
     a.add_argument("--bst", default=None)
     a.set_defaults(func=cmd_ab)
+
+    s = sub.add_parser("shuttle-smoke")
+    s.add_argument("--video", required=True)
+    s.add_argument("--tracknet", required=True)
+    s.add_argument("--inpaintnet", default=None)
+    s.add_argument("--device", default="cpu")
+    s.add_argument("--max_frames", type=int, default=16,
+                   help="limit frames for local CPU/WSL validation")
+    s.add_argument("--batch_size", type=int, default=8,
+                   help="tiny local batches avoid CPU/WSL memory spikes")
+    s.add_argument("--seq_len", type=int, default=16)
+    s.set_defaults(func=cmd_shuttle_smoke)
 
     args = ap.parse_args()
     if args.cmd is None:

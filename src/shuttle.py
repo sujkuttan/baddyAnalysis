@@ -5,45 +5,24 @@ import torch.nn as nn
 
 
 class _ConvBlock(nn.Module):
-    def __init__(self, in_c, out_c, stride=1, transpose=False):
+    def __init__(self, in_c, out_c):
         super().__init__()
-        if transpose:
-            self.conv = nn.ConvTranspose2d(in_c, out_c, 3, stride=stride,
-                                           padding=1, output_padding=1 if stride > 1 else 0,
-                                           bias=False)
-        else:
-            self.conv = nn.Conv2d(in_c, out_c, 3, stride=stride, padding=1, bias=False)
+        self.conv = nn.Conv2d(in_c, out_c, 3, padding="same", bias=False)
         self.bn = nn.BatchNorm2d(out_c)
 
     def forward(self, x):
         return torch.relu(self.bn(self.conv(x)))
 
 
-class _DownBlock(nn.Module):
-    def __init__(self, in_c, out_c, n_convs, downsample=True):
+class _ConvStack(nn.Module):
+    def __init__(self, in_c, out_c, n_convs):
         super().__init__()
-        setattr(self, "conv_1", _ConvBlock(in_c, out_c, stride=2 if downsample else 1))
+        setattr(self, "conv_1", _ConvBlock(in_c, out_c))
         for i in range(2, n_convs + 1):
-            setattr(self, f"conv_{i}", _ConvBlock(out_c, out_c, stride=1))
+            setattr(self, f"conv_{i}", _ConvBlock(out_c, out_c))
 
     def forward(self, x):
         for i in range(1, len(self._modules) + 1):
-            x = getattr(self, f"conv_{i}")(x)
-        return x
-
-
-class _UpBlock(nn.Module):
-    def __init__(self, concat_ch, out_c, n_convs):
-        super().__init__()
-        self.n_convs = n_convs
-        self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-        setattr(self, "conv_1", _ConvBlock(concat_ch, out_c, stride=1))
-        for i in range(2, n_convs + 1):
-            setattr(self, f"conv_{i}", _ConvBlock(out_c, out_c, stride=1))
-
-    def forward(self, x):
-        x = self.upsample(x)
-        for i in range(1, self.n_convs + 1):
             x = getattr(self, f"conv_{i}")(x)
         return x
 
@@ -52,32 +31,38 @@ class TrackNet(nn.Module):
     """Canonical TrackNet: down_block_1..3 -> bottleneck -> up_block_1..3 -> predictor.
 
     Matches the published checkpoint key naming (down_block_1.conv_1.conv.weight,
-    up_block_1.conv_1.bn.*, predictor.weight, ...). Downsampling is via stride-2
-    convs, upsampling via stride-2 transpose-convs; output heatmap is sigmoided.
+    up_block_1.conv_1.bn.*, predictor.weight, ...). Downsampling is via MaxPool2d
+    between encoder blocks; decoder maps are upsampled before skip concatenation.
     """
 
     def __init__(self, in_channels=27, out_channels=8):
         super().__init__()
-        self.down_block_1 = _DownBlock(in_channels, 64, 2, downsample=True)
-        self.down_block_2 = _DownBlock(64, 128, 2, downsample=True)
-        self.down_block_3 = _DownBlock(128, 256, 3, downsample=True)
-        self.bottleneck = _DownBlock(256, 512, 3, downsample=False)
-        # U-Net skip connections: each up block concatenates the upsampled
-        # previous decoder map with the corresponding encoder feature map.
-        self.up_block_1 = _UpBlock(512 + 256, 256, 3)   # bottleneck(512) + e3(256)
-        self.up_block_2 = _UpBlock(256 + 128, 128, 2)   # up1(256) + e2(128)
-        self.up_block_3 = _UpBlock(128 + 64, 64, 2)     # up2(128) + e1(64)
+        self.down_block_1 = _ConvStack(in_channels, 64, 2)
+        self.down_block_2 = _ConvStack(64, 128, 2)
+        self.down_block_3 = _ConvStack(128, 256, 3)
+        self.bottleneck = _ConvStack(256, 512, 3)
+        self.up_block_1 = _ConvStack(512 + 256, 256, 3)
+        self.up_block_2 = _ConvStack(256 + 128, 128, 2)
+        self.up_block_3 = _ConvStack(128 + 64, 64, 2)
         self.predictor = nn.Conv2d(64, out_channels, 1)
+        self.pool = nn.MaxPool2d((2, 2), stride=(2, 2))
+        self.upsample = nn.Upsample(scale_factor=2)
 
     def forward(self, x):
-        e1 = self.down_block_1(x)
-        e2 = self.down_block_2(e1)
-        e3 = self.down_block_3(e2)
-        b = self.bottleneck(e3)
-        up1 = self.up_block_1(torch.cat([b, e3], dim=1))
-        up2 = self.up_block_2(torch.cat([up1, e2], dim=1))
-        up3 = self.up_block_3(torch.cat([up2, e1], dim=1))
-        return torch.sigmoid(self.predictor(up3))
+        x1 = self.down_block_1(x)
+        x = self.pool(x1)
+        x2 = self.down_block_2(x)
+        x = self.pool(x2)
+        x3 = self.down_block_3(x)
+        x = self.pool(x3)
+        x = self.bottleneck(x)
+        x = torch.cat([self.upsample(x), x3], dim=1)
+        x = self.up_block_1(x)
+        x = torch.cat([self.upsample(x), x2], dim=1)
+        x = self.up_block_2(x)
+        x = torch.cat([self.upsample(x), x1], dim=1)
+        x = self.up_block_3(x)
+        return torch.sigmoid(self.predictor(x))
 
 
 def _predict_location(heatmap):
@@ -174,7 +159,7 @@ class TrackNetShuttle:
             ret, f = cap.read()
             if not ret:
                 break
-            im = cv2.resize(f, (Ww, Hh)).astype(np.float32)
+            im = cv2.resize(f, (Ww, Hh))
             small.append(im)
             sum_arr = im.astype(np.float64) if sum_arr is None else sum_arr + im
             n += 1
@@ -193,8 +178,8 @@ class TrackNetShuttle:
         if n == 0:
             return np.array([], dtype=np.float64)
         Hh, Ww = self.img_size
-        accum = np.zeros((n, Hh, Ww), dtype=np.float64)
-        wsum = np.zeros(n, dtype=np.float64)
+        accum = np.zeros((n, Hh, Ww), dtype=np.float32)
+        wsum = np.zeros(n, dtype=np.float32)
         w = self.weight
         chunk = 8
 
@@ -245,20 +230,31 @@ class TrackNetShuttle:
     def predict_frames(self, frames):
         """frames: list of BGR frames (a batch). Buffers across calls like before
         but uses concat-background + sliding-window ensemble decoding."""
-        return self._predict_list(list(self._buf) + list(frames), append_buf=True)
+        new_frames = list(frames)
+        if len(new_frames) == 0:
+            return np.array([], dtype=np.float64)
+        context = list(self._buf) + new_frames
+        preds = self._predict_list(context)
+        keep = max(self.seq_len - 1, 0)
+        self._buf = context[-keep:] if keep else []
+        return preds[-len(new_frames):]
 
     def _predict_list(self, frames, append_buf=False, max_frames=None):
         """RAM-guarded entry used by the pipeline (feeds 128-frame batches)."""
         if max_frames is not None:
             frames = frames[:max_frames]
         if append_buf:
-            self._buf = frames
+            keep = max(self.seq_len - 1, 0)
+            self._buf = frames[-keep:] if keep else []
         if len(frames) == 0:
             return np.array([], dtype=np.float64)
         Hh, Ww = self.img_size
         fw, fh = frames[-1].shape[1], frames[-1].shape[0]
         # Resize to model size up front and drop full-res frames (RAM guard).
-        small = [cv2.resize(f, (Ww, Hh)).astype(np.float32) for f in frames]
+        small = [cv2.resize(f, (Ww, Hh)) for f in frames]
         del frames
-        bg = np.median(np.array(small, dtype=np.float64), axis=0).astype(np.uint8)
+        sum_arr = None
+        for im in small:
+            sum_arr = im.astype(np.float64) if sum_arr is None else sum_arr + im
+        bg = (sum_arr / max(len(small), 1)).astype(np.uint8)
         return self._predict_from_small(small, bg, fw, fh)
