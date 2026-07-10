@@ -241,21 +241,22 @@ def _rescale_dets(dets, s):
     return dets
 
 
-def track_frame(model, frame, device="cpu", tracker="bytetrack.yaml", upscale=1.0):
+def track_frame(model, frame, device="cpu", tracker="bytetrack.yaml", upscale=1.0, conf=0.25):
     """Run pose tracking on a frame. If `upscale` > 1 the frame is enlarged
     before detection (more pixels for small/distant players) and the resulting
     keypoints are scaled back to original image coordinates so they stay aligned
-    with the court homography."""
+    with the court homography. `conf` lowers the detection threshold to recover
+    faint/small players (e.g. a distant athlete)."""
     if upscale and upscale > 1.0:
         h, w = frame.shape[:2]
         big = cv2.resize(frame, (int(round(w * upscale)), int(round(h * upscale))))
         results = model.track(big, tracker=tracker, persist=True, device=device,
-                              verbose=False, classes=0)
+                              verbose=False, classes=0, conf=conf)
         if isinstance(results, (list, tuple)):
             results = results[0]
         return _rescale_dets(parse_detections(results), 1.0 / upscale)
     results = model.track(frame, tracker=tracker, persist=True, device=device,
-                          verbose=False, classes=0)
+                          verbose=False, classes=0, conf=conf)
     if isinstance(results, (list, tuple)):
         results = results[0]
     return parse_detections(results)

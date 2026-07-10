@@ -25,7 +25,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                        device="cpu", tracknet_weights=None, inpaintnet_weights=None,
                        use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
                        batch_size=128, debug=False, max_players=None,
-                       pose_model="yolov8s-pose.pt", pose_upscale=1.0):
+                       pose_model="yolov8s-pose.pt", pose_upscale=1.0, pose_conf=0.25):
     import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
@@ -67,7 +67,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             gray = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
             Hs.append(stabilize.stabilize_frame(state, gray))
         for f in batch:
-            frames_all.append(posemod.track_frame(model, f, device=device, upscale=pose_upscale))
+            frames_all.append(posemod.track_frame(model, f, device=device, upscale=pose_upscale, conf=pose_conf))
         if tracknet is not None:
             shuttle_img.extend(tracknet.predict_frames(batch))
         else:

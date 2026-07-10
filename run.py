@@ -56,7 +56,7 @@ def cmd_pipeline(args):
         llm_provider=args.llm_provider, llm_key=args.llm_key,
         max_frames=args.max_frames, batch_size=args.batch_size, debug=args.debug,
         max_players=args.max_players, pose_model=args.pose_model,
-        pose_upscale=args.pose_upscale,
+        pose_upscale=args.pose_upscale, pose_conf=args.pose_conf,
     )
 
 
@@ -140,6 +140,9 @@ def main():
     p.add_argument("--pose_upscale", type=float, default=1.0,
                    help="upscale factor applied before pose detection (e.g. 1.5) to give "
                         "small/distant players more pixels; keypoints are rescaled back")
+    p.add_argument("--pose_conf", type=float, default=0.25,
+                   help="YOLO pose detection confidence threshold (default 0.25); lower "
+                        "it (e.g. 0.1) to recover faint/small distant players")
     p.add_argument("--debug", action="store_true", help="print shuttle/contact/label diagnostics")
     p.add_argument("--llm_provider", default=None)
     p.add_argument("--llm_key", default=None)

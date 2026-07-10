@@ -98,14 +98,15 @@ SAMPLE_FRAMES = 3600
 # enlarges each frame before pose detection (more pixels on distant players).
 POSE_MODEL = 'yolov8s-pose.pt'
 POSE_UPSCALE = 1.0
+POSE_CONF = 0.25
 print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES}, '
-      f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE} ---')
+      f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE}, pose_conf={POSE_CONF} ---')
 res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',
     labels_csv='labels_import.csv', device=device,
     tracknet_weights=tracknet, inpaintnet_weights=inpaintnet, batch_size=BATCH_SIZE,
     max_frames=SAMPLE_FRAMES, debug=True,
-    pose_model=POSE_MODEL, pose_upscale=POSE_UPSCALE,
+    pose_model=POSE_MODEL, pose_upscale=POSE_UPSCALE, pose_conf=POSE_CONF,
 )
 print('predictions:', res['predictions_csv'])
 print('metrics:', res['metrics'])''')
