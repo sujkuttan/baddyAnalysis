@@ -117,6 +117,18 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     contacts_img = contactmod.detect_contacts_image_space(
         shuttle_px, {p: players[p]["pose_img"] for p in players},
         fps, max_dist_px=IMAGE_CONTACT_MAX_DIST_PX)
+    if debug:
+        print(f"[diag] contacts_by_source near={len(contacts_near)} "
+              f"ang={len(contacts_ang)} img={len(contacts_img)} "
+              f"(merged={len(contacts_near) + len(contacts_ang) + len(contacts_img)})")
+        for pid in players:
+            w = np.array(players[pid]["pose_court"])[:, 9:11]
+            valid = ~np.any(np.isnan(w.reshape(-1, 2)), axis=1)
+            cov_frac = float(np.mean(valid)) if len(valid) else 0.0
+            near_at = sum(1 for c in contacts_near
+                          if c < len(valid) and valid[c])
+            print(f"[diag] player {pid}: wrist_valid_frac={cov_frac:.2f} "
+                  f"near-source contacts at valid wrist={near_at}/{len(contacts_near)}")
     contacts = contactmod.merge_contacts(
         contacts_near, contacts_ang, contacts_img, min_gap=0.35, fps=fps)
     spd = np.linalg.norm(contactmod.shuttle_speed(shuttle_court, fps), axis=1)
