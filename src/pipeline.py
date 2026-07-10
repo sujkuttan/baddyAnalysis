@@ -146,13 +146,14 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         for a in attrib:
             pc[a] = pc.get(a, 0) + 1
         for pid in sorted(pc, key=lambda p: int(p)):
-            fy = np.nanmean([
-                players[pid]["foot_court"][i, 1]
-                for i in range(len(players[pid]["foot_court"]))
-                if not np.any(np.isnan(players[pid]["foot_court"][i]))
-            ]) if pid in players else float("nan")
+            fyc = players[pid]["foot_court"] if pid in players else np.full((0, 2), np.nan)
+            valid = [fy for fy in fyc[:, 1] if not np.isnan(fy)]
+            fy = np.nanmean(valid) if valid else float("nan")
+            fy_min = min(valid) if valid else float("nan")
+            fy_max = max(valid) if valid else float("nan")
             side = "near" if (not np.isnan(fy) and fy < COURT_LENGTH / 2) else "far"
-            print(f"[debug] player {pid}: {pc[pid]} contacts, mean_foot_y={fy:.1f} ({side})")
+            print(f"[debug] player {pid}: {pc[pid]} contacts, foot_y mean={fy:.1f} "
+                  f"min={fy_min:.1f} max={fy_max:.1f} ({side})")
 
     print("[4/8] racket trajectories...")
     racket_streams = {p: players[p]["racket"] for p in players}
