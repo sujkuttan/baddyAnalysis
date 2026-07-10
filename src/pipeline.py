@@ -166,7 +166,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             fy = np.nanmean(valid) if valid else float("nan")
             fy_min = min(valid) if valid else float("nan")
             fy_max = max(valid) if valid else float("nan")
-            side = "near" if (not np.isnan(fy) and fy < COURT_LENGTH / 2) else "far"
+            side = "near" if (not np.isnan(fy) and fy > COURT_LENGTH / 2) else "far"
             print(f"[debug] player {pid}: {pc[pid]} contacts, foot_y mean={fy:.1f} "
                   f"min={fy_min:.1f} max={fy_max:.1f} ({side})")
 
@@ -369,7 +369,7 @@ def _side_agreement(labels_csv, contacts, attrib, players, shuttle_court=None, m
         fyc = np.array(players[pid]["foot_court"], dtype=np.float64)
         valid = fyc[~np.any(np.isnan(fyc), axis=1)]
         if len(valid):
-            sides[pid] = "near" if valid[:, 1].mean() < COURT_LENGTH / 2 else "far"
+            sides[pid] = "near" if valid[:, 1].mean() > COURT_LENGTH / 2 else "far"
     if not sides:
         return
     sh = np.array(shuttle_court, dtype=np.float64) if shuttle_court is not None else None
