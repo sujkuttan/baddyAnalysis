@@ -23,6 +23,14 @@ IMAGE_CONTACT_MAX_DIST_PX = 60.0
 # rather than being handed to the nearest (but wrong) player.
 ATTRIB_MAX_DIST_M = 3.0
 
+# Half-aware contact attribution: assign a hit to the player on the court half
+# where the shuttle is (halves defined by stable player foot positions, not the
+# noisy shuttle warp), within a generous gate. Counters the better-detected
+# player stealing hits on the other half. Set False for legacy nearest-wrist.
+HALF_AWARE_ATTRIB = True
+HALF_AWARE_TOL_M = 1.0
+HALF_AWARE_GATE_M = 4.0
+
 # TrackNet decode heatmap threshold. Lower = more (incl. low-confidence) shuttle
 # detections, at the cost of more false positives. Tuned down from 0.5 to recover
 # shuttle detections at hit instants that otherwise get missed.

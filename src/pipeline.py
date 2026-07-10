@@ -10,7 +10,8 @@ from . import biomech, racket_bootstrap, movement, baseline, viz, llm_feedback, 
 from . import inpaintnet as inpaintmod
 from .config import (STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH,
                      validate_court_corners, OOB_MARGIN_M, MAX_SHUTTLE_SPEED_MPS,
-                     IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH, ATTRIB_MAX_DIST_M)
+                     IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH, ATTRIB_MAX_DIST_M,
+                     HALF_AWARE_ATTRIB, HALF_AWARE_TOL_M, HALF_AWARE_GATE_M)
 
 
 def _wrist_stream(players, pid):
@@ -147,7 +148,8 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         print("WARNING: 0 shuttle contacts detected. Check TrackNet weights and shuttle coverage.")
     attrib = biomech.attribute_contact(
         contacts, {p: players[p]["pose_court"] for p in players}, shuttle_court,
-        max_dist=ATTRIB_MAX_DIST_M, debug=debug)
+        max_dist=ATTRIB_MAX_DIST_M, debug=debug, half_aware=HALF_AWARE_ATTRIB,
+        half_tol=HALF_AWARE_TOL_M, half_gate=HALF_AWARE_GATE_M)
     # Drop contacts with no attributed player: a real hit always has a hitter,
     # so unattributed contacts are false positives (drives over-counting).
     if len(contacts) != len(attrib):

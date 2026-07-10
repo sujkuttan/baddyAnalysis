@@ -1,6 +1,6 @@
 import numpy as np
 
-from .config import PLAYER_IDS
+from .config import PLAYER_IDS, COURT_LENGTH
 
 SHOULDER = [5, 6]
 ELBOW = [7, 8]
@@ -49,13 +49,37 @@ def kinetic_chain(court_poses, contact_frame, fps, window=14):
 
 
 def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=None,
-                      window=3, max_dist=2.0, debug=False):
-    """Assign each contact frame to the player whose wrist is closest to the
-    shuttle. A contact is only attributed when the winning wrist is within
-    `max_dist` meters of the shuttle; otherwise it is dropped (None) instead of
-    being handed to a farther, spurious player."""
+                      window=3, max_dist=2.0, debug=False, half_aware=True,
+                      half_tol=1.0, half_gate=4.0):
+    """Assign each contact frame to the player who hit.
+
+    Two modes:
+    - `half_aware=True` (default): a hit belongs to the player on the half of
+      the court where the shuttle is, provided that player has a wrist within
+      `half_gate` m (generous, to tolerate shuttle-warp noise). Only near the
+      net (shuttle_y within `half_tol` of center) or when the half-owner's wrist
+      is invalid does it fall back to the globally-nearest wrist. This stops the
+      better-detected/centered player from stealing hits that occur on the other
+      player's half (the main source of the near/far attribution bias).
+    - `half_aware=False`: plain nearest-wrist within `max_dist` (legacy).
+
+    A contact is dropped (None) when no valid wrist is within range."""
     if player_ids is None:
         player_ids = list(poses_court.keys())
+
+    # Stable per-player half from mean foot (ankle) y. Far = smaller y (top of
+    # image), near = larger y (toward camera).
+    half_of = {}
+    for pid in player_ids:
+        pseq = poses_court.get(pid)
+        if pseq is None:
+            continue
+        foot = pseq[:, 15:17, 1]  # ankle y over frames
+        foot = foot[~np.any(np.isnan(foot), axis=1)]
+        if len(foot):
+            half_of[pid] = "near" if foot.mean() > COURT_LENGTH / 2 else "far"
+
+    net = COURT_LENGTH / 2
     attrib = []
     n_dropped = 0
     for cf in contact_frames:
@@ -89,17 +113,41 @@ def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=Non
                 per_pid[pid] = pmin
                 if pmin < best_d:
                     best_d, best_pid = pmin, pid
-        if best_pid is not None and best_d <= max_dist:
-            attrib.append(best_pid)
+
+        chosen = None
+        mode = "NEAR"
+        if half_aware and target is not None and half_of:
+            sy = target[1]
+            if sy < net - half_tol:
+                cand = [p for p, h in half_of.items() if h == "far"]
+            elif sy > net + half_tol:
+                cand = [p for p, h in half_of.items() if h == "near"]
+            else:
+                cand = list(half_of.keys())  # near net: use nearest wrist
+            # Among candidates, prefer the one with a valid wrist; require it to
+            # be within half_gate (tolerant of warp noise). Pick nearest if several.
+            cand_valid = [(p, per_pid[p]) for p in cand if p in per_pid]
+            if cand_valid:
+                cand_valid.sort(key=lambda kv: kv[1])
+                cpid, cd = cand_valid[0]
+                if cd <= half_gate:
+                    chosen = cpid
+                    mode = "HALF" if (sy < net - half_tol or sy > net + half_tol) else "NEAR"
+        if chosen is None:
+            if best_pid is not None and best_d <= max_dist:
+                chosen = best_pid
+                mode = "NEAR"
+        if chosen is not None:
+            attrib.append(chosen)
         else:
             attrib.append(None)
             n_dropped += 1
         if debug:
             dists = " ".join(f"p{pid}:{d:.2f}" for pid, d in sorted(per_pid.items()))
-            verdict = f"pid={best_pid} dist={best_d:.2f}" if best_pid is not None else "NO-WRIST"
-            tag = "" if (best_pid is not None and best_d <= max_dist) else " DROPPED(>{max_dist})"
-            print(f"[attrib] cf={cf} -> {verdict} | {dists}{tag}")
+            verdict = f"pid={chosen} dist={per_pid.get(chosen, best_d):.2f}" if chosen is not None else "NO-WRIST"
+            tag = "" if chosen is not None else " DROPPED"
+            print(f"[attrib] cf={cf} -> {verdict} [{mode}] | {dists}{tag}")
     if debug:
         print(f"[attrib] summary: dropped={n_dropped}/{len(contact_frames)} "
-              f"(max_dist={max_dist}m)")
+              f"(max_dist={max_dist}m half_gate={half_gate}m)")
     return attrib
