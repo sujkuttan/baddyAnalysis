@@ -205,6 +205,8 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     frame_to_shot = None
     if labels_csv and os.path.exists(labels_csv):
         frame_to_shot = _label_frame_map(labels_csv)
+        if debug:
+            _side_agreement(labels_csv, contacts, attrib, players)
         print("  training fusion classifier on labeled shots...")
         try:
             trained = _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs, fps, device, debug=debug, shuttle_court=shuttle_court)
@@ -351,6 +353,53 @@ def _label_frame_map(labels_csv):
             except Exception:
                 pass
     return m
+
+
+def _side_agreement(labels_csv, contacts, attrib, players, match_window=15):
+    """Validate contact attribution against the labels' near/far `side`.
+
+    For each in-range labeled shot, take the nearest detected contact and compare
+    the attributed player's side (from its mean foot y) to the label's side. This
+    is the definitive test of whether the near/far attribution split is correct."""
+    import csv as _csv
+    gt = [r for r in _csv.DictReader(open(labels_csv)) if r.get("label_status") == "labeled"]
+    sides = {}
+    for pid in players:
+        fyc = np.array(players[pid]["foot_court"], dtype=np.float64)
+        valid = fyc[~np.any(np.isnan(fyc), axis=1)]
+        if len(valid):
+            sides[pid] = "near" if valid[:, 1].mean() < COURT_LENGTH / 2 else "far"
+    if not sides or not contacts:
+        return
+    agree = mism = unmatched = 0
+    mismatches = []
+    for g in gt:
+        try:
+            lf = int(float(g["frame"]))
+        except Exception:
+            continue
+        side = g.get("side")
+        if side not in ("near", "far") or lf >= len(contacts):
+            continue
+        j = min(range(len(contacts)), key=lambda i: abs(contacts[i] - lf))
+        if abs(contacts[j] - lf) > match_window:
+            unmatched += 1
+            continue
+        pid = attrib[j]
+        if pid is None or pid not in sides:
+            unmatched += 1
+            continue
+        if sides[pid] == side:
+            agree += 1
+        else:
+            mism += 1
+            mismatches.append((lf, sides[pid], side, int(contacts[j])))
+    total = agree + mism
+    if total:
+        print(f"[validate] side_agreement vs labels: {agree}/{total} "
+              f"({100 * agree / total:.1f}%)  unmatched(>={match_window}f)={unmatched}")
+        for m in mismatches[:20]:
+            print(f"[validate]   mismatch label_frame={m[0]} pred={m[1]} label={m[2]} contact_frame={m[3]}")
 
 
 def _stroke_counts(preds):
