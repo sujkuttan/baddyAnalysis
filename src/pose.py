@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 from .stabilize import warp_points
-from .config import COURT_LENGTH
+from .config import COURT_WIDTH, COURT_LENGTH, OOB_MARGIN_M
 
 
 def track_and_pose(video_path, pose_model="yolov8s-pose.pt", tracker="bytetrack.yaml",
@@ -86,6 +86,7 @@ def build_frame_players(frames_all, H, K=None, foot_thresh=1.5, min_track_frac=0
 
     N = len(frames_all)
     dets = []
+    court_margin = OOB_MARGIN_M if "OOB_MARGIN_M" in globals() else 2.0
     for f, dlist in enumerate(frames_all):
         for d in dlist:
             kp = np.array(d["keypoints"], dtype=np.float64)
@@ -95,6 +96,14 @@ def build_frame_players(frames_all, H, K=None, foot_thresh=1.5, min_track_frac=0
             ft = foot_point(kp)
             ftc = warp_points(H, ft.reshape(1, 2))[0]
             if np.any(np.isnan(ftc)):
+                continue
+            # Reject detections whose warped foot lands far outside the court:
+            # these are off-court false positives (spectators, TrackNet ghosts,
+            # upscaled-noise boxes) that otherwise corrupt a player's track and
+            # scatter its wrist-shuttle distances. Legit wide reaches stay within
+            # the margin used for the shuttle OOB box.
+            if (ftc[0] < -court_margin or ftc[0] > COURT_WIDTH + court_margin or
+                    ftc[1] < -court_margin or ftc[1] > COURT_LENGTH + court_margin):
                 continue
             dets.append((f, ftc, kp, pc))
 
