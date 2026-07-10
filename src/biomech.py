@@ -48,33 +48,58 @@ def kinetic_chain(court_poses, contact_frame, fps, window=14):
     }
 
 
-def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=None, window=3):
+def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=None,
+                      window=3, max_dist=2.0, debug=False):
+    """Assign each contact frame to the player whose wrist is closest to the
+    shuttle. A contact is only attributed when the winning wrist is within
+    `max_dist` meters of the shuttle; otherwise it is dropped (None) instead of
+    being handed to a farther, spurious player."""
     if player_ids is None:
         player_ids = list(poses_court.keys())
     attrib = []
+    n_dropped = 0
     for cf in contact_frames:
         if shuttle_court is not None and (cf >= len(shuttle_court) or np.any(np.isnan(shuttle_court[cf]))):
             attrib.append(None)
+            if debug:
+                print(f"[attrib] cf={cf} -> NONE (shuttle NaN/OOB)")
             continue
-        best, best_d = None, np.inf
         lo = max(0, cf - window)
         if shuttle_court is not None:
             hi = min(len(shuttle_court), cf + window + 1)
         else:
             hi = cf + window + 1
+        target = None if shuttle_court is None else shuttle_court[cf]
+        best_pid, best_d = None, np.inf
+        per_pid = {}
         for pid in player_ids:
             pseq = poses_court.get(pid)
             if pseq is None or len(pseq) <= lo:
                 continue
             sub = pseq[lo:hi]
-            target = None if shuttle_court is None else shuttle_court[cf]
+            pmin = np.inf
             for pose in sub:
                 for widx in WRIST:
                     w = pose[widx]
                     if np.any(np.isnan(w)):
                         continue
                     d = 0.0 if target is None else float(np.linalg.norm(w - target))
-                    if d < best_d:
-                        best_d, best = d, pid
-        attrib.append(best)
+                    pmin = min(pmin, d)
+            if pmin < np.inf:
+                per_pid[pid] = pmin
+                if pmin < best_d:
+                    best_d, best_pid = pmin, pid
+        if best_pid is not None and best_d <= max_dist:
+            attrib.append(best_pid)
+        else:
+            attrib.append(None)
+            n_dropped += 1
+        if debug:
+            dists = " ".join(f"p{pid}:{d:.2f}" for pid, d in sorted(per_pid.items()))
+            verdict = f"pid={best_pid} dist={best_d:.2f}" if best_pid is not None else "NO-WRIST"
+            tag = "" if (best_pid is not None and best_d <= max_dist) else " DROPPED(>{max_dist})"
+            print(f"[attrib] cf={cf} -> {verdict} | {dists}{tag}")
+    if debug:
+        print(f"[attrib] summary: dropped={n_dropped}/{len(contact_frames)} "
+              f"(max_dist={max_dist}m)")
     return attrib

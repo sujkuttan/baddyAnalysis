@@ -10,7 +10,7 @@ from . import biomech, racket_bootstrap, movement, baseline, viz, llm_feedback, 
 from . import inpaintnet as inpaintmod
 from .config import (STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH,
                      validate_court_corners, OOB_MARGIN_M, MAX_SHUTTLE_SPEED_MPS,
-                     IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH)
+                     IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH, ATTRIB_MAX_DIST_M)
 
 
 def _wrist_stream(players, pid):
@@ -145,7 +145,9 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         print("[debug] first contacts:", contacts[:20])
     if len(contacts) == 0:
         print("WARNING: 0 shuttle contacts detected. Check TrackNet weights and shuttle coverage.")
-    attrib = biomech.attribute_contact(contacts, {p: players[p]["pose_court"] for p in players}, shuttle_court)
+    attrib = biomech.attribute_contact(
+        contacts, {p: players[p]["pose_court"] for p in players}, shuttle_court,
+        max_dist=ATTRIB_MAX_DIST_M, debug=debug)
     # Drop contacts with no attributed player: a real hit always has a hitter,
     # so unattributed contacts are false positives (drives over-counting).
     if len(contacts) != len(attrib):
@@ -280,7 +282,7 @@ def _train_and_predict(labels_csv, contacts, attrib, players, racket_streams, Hs
                 continue
             if any(abs(lf - c) <= MATCH_WINDOW for c in contacts):
                 continue
-            pa = biomech.attribute_contact([lf], court_poses, shuttle_court=None, player_ids=list(players.keys()))
+            pa = biomech.attribute_contact([lf], court_poses, shuttle_court=None, player_ids=list(players.keys()), max_dist=ATTRIB_MAX_DIST_M)
             ps = clfmod.extract_stroke_windows(court_poses, racket_streams, mbh_dummy, [lf], pa)
             for s in ps:
                 s["label"] = STROKE_TO_ID[frame_to_label[lf]]

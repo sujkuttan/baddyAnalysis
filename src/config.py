@@ -17,6 +17,12 @@ MAX_SHUTTLE_SPEED_MPS = 100.0
 # off-court (and so misses real hits). Tune to frame resolution.
 IMAGE_CONTACT_MAX_DIST_PX = 60.0
 
+# Attribution gate: a detected contact is only assigned to a player if that
+# player's wrist is within this distance (m) of the shuttle at the contact
+# frame. Contacts farther than this from every wrist are dropped as spurious
+# rather than being handed to the nearest (but wrong) player.
+ATTRIB_MAX_DIST_M = 2.0
+
 # TrackNet decode heatmap threshold. Lower = more (incl. low-confidence) shuttle
 # detections, at the cost of more false positives. Tuned down from 0.5 to recover
 # shuttle detections at hit instants that otherwise get missed.
