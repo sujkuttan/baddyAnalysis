@@ -55,7 +55,8 @@ def cmd_pipeline(args):
         inpaintnet_weights=args.inpaintnet, use_mbh=args.mbh,
         llm_provider=args.llm_provider, llm_key=args.llm_key,
         max_frames=args.max_frames, batch_size=args.batch_size, debug=args.debug,
-        max_players=args.max_players,
+        max_players=args.max_players, pose_model=args.pose_model,
+        pose_upscale=args.pose_upscale,
     )
 
 
@@ -133,6 +134,12 @@ def main():
     p.add_argument("--batch_size", type=int, default=DEFAULT_LOCAL_BATCH_SIZE, help="frames per batch")
     p.add_argument("--max_players", type=int, default=None,
                    help="known player count (2=singles, 4=doubles); merges fragmented tracks into K players")
+    p.add_argument("--pose_model", default="yolov8s-pose.pt",
+                   help="YOLOv8 pose weights; use a larger model (e.g. yolov8m-pose.pt) "
+                        "for better detection of small/distant players")
+    p.add_argument("--pose_upscale", type=float, default=1.0,
+                   help="upscale factor applied before pose detection (e.g. 1.5) to give "
+                        "small/distant players more pixels; keypoints are rescaled back")
     p.add_argument("--debug", action="store_true", help="print shuttle/contact/label diagnostics")
     p.add_argument("--llm_provider", default=None)
     p.add_argument("--llm_key", default=None)

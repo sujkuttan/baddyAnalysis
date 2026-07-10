@@ -93,12 +93,19 @@ BATCH_SIZE = 64
 # 900 = ~30s smoke test. 3600 = ~120s (includes all labeled shots, trains classifier).
 # None = full 5-min sample. The 100 labels are on the first ~120s of this sample.
 SAMPLE_FRAMES = 3600
-print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES} ---')
+# Pose model: default yolov8s-pose.pt. Use a larger model (e.g. yolov8m-pose.pt) or a
+# newer architecture for better detection of small/distant players. POSE_UPSCALE
+# enlarges each frame before pose detection (more pixels on distant players).
+POSE_MODEL = 'yolov8s-pose.pt'
+POSE_UPSCALE = 1.0
+print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES}, '
+      f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE} ---')
 res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',
     labels_csv='labels_import.csv', device=device,
     tracknet_weights=tracknet, inpaintnet_weights=inpaintnet, batch_size=BATCH_SIZE,
     max_frames=SAMPLE_FRAMES, debug=True,
+    pose_model=POSE_MODEL, pose_upscale=POSE_UPSCALE,
 )
 print('predictions:', res['predictions_csv'])
 print('metrics:', res['metrics'])''')

@@ -232,7 +232,28 @@ def parse_detections(result):
     return dets
 
 
-def track_frame(model, frame, device="cpu", tracker="bytetrack.yaml"):
+def _rescale_dets(dets, s):
+    """Scale parsed detections (bboxes + keypoints) by factor s, e.g. to map
+    keypoints from an upscaled frame back to original image coordinates."""
+    for d in dets:
+        d["bbox"] = d["bbox"] * s
+        d["keypoints"] = d["keypoints"] * s
+    return dets
+
+
+def track_frame(model, frame, device="cpu", tracker="bytetrack.yaml", upscale=1.0):
+    """Run pose tracking on a frame. If `upscale` > 1 the frame is enlarged
+    before detection (more pixels for small/distant players) and the resulting
+    keypoints are scaled back to original image coordinates so they stay aligned
+    with the court homography."""
+    if upscale and upscale > 1.0:
+        h, w = frame.shape[:2]
+        big = cv2.resize(frame, (int(round(w * upscale)), int(round(h * upscale))))
+        results = model.track(big, tracker=tracker, persist=True, device=device,
+                              verbose=False, classes=0)
+        if isinstance(results, (list, tuple)):
+            results = results[0]
+        return _rescale_dets(parse_detections(results), 1.0 / upscale)
     results = model.track(frame, tracker=tracker, persist=True, device=device,
                           verbose=False, classes=0)
     if isinstance(results, (list, tuple)):

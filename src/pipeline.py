@@ -24,7 +24,8 @@ def _wrist_stream(players, pid):
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                        device="cpu", tracknet_weights=None, inpaintnet_weights=None,
                        use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
-                       batch_size=128, debug=False, max_players=None):
+                       batch_size=128, debug=False, max_players=None,
+                       pose_model="yolov8s-pose.pt", pose_upscale=1.0):
     import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
@@ -36,7 +37,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     validate_court_corners(corners)
     state = stabilize.init_stabilizer_state(corners)
     H0 = state["H0"]
-    model = posemod.load_pose_model("yolov8s-pose.pt", device=device)
+    model = posemod.load_pose_model(pose_model, device=device)
     tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device, heat_thresh=TRACKNET_HEAT_THRESH) if tracknet_weights else None
     if tracknet is None:
         print("WARNING: TrackNet weights NOT provided (tracknet_weights=None). "
@@ -66,7 +67,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             gray = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
             Hs.append(stabilize.stabilize_frame(state, gray))
         for f in batch:
-            frames_all.append(posemod.track_frame(model, f, device=device))
+            frames_all.append(posemod.track_frame(model, f, device=device, upscale=pose_upscale))
         if tracknet is not None:
             shuttle_img.extend(tracknet.predict_frames(batch))
         else:
