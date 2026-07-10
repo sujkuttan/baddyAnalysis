@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 
 from .stabilize import warp_points
+from .config import COURT_LENGTH
 
 
 def track_and_pose(video_path, pose_model="yolov8s-pose.pt", tracker="bytetrack.yaml",
@@ -167,11 +168,25 @@ def _merge_frag_tracks(frag_tracks):
 
 
 def _cluster_tracks_to_k(tracks, K, seed=0):
-    """Merge fragmented tracker IDs into exactly K players by clustering their
-    mean floor positions (K-means). For a singles (K=2) or doubles (K=4) match
-    this collapses per-player fragmentation from ByteTrack gaps."""
+    """Merge fragmented tracker IDs into exactly K players.
+
+    For singles (K=2) players defend opposite halves, separated by the net line
+    (y = COURT_LENGTH/2). Assign each fragment to a half by its mean foot-y and
+    merge within the half -- deterministic and robust to fragmentation (K-means
+    on centroids can collapse into a bad local minimum, mixing both halves into
+    each player). For K != 2 fall back to K-means on floor centroids.
+    """
     if len(tracks) <= K:
         return tracks
+    if K == 2:
+        mid = COURT_LENGTH / 2.0
+        groups = [[], []]
+        for t in tracks:
+            fy = np.nanmean(np.array(t["foot"], dtype=np.float64), axis=0)[1]
+            groups[0 if fy < mid else 1].append(t)
+        if not groups[0]:
+            groups[0], groups[1] = groups[1], groups[0]
+        return [_merge_frag_tracks(g) for g in groups if g]
     cents = np.array(
         [np.nanmean(np.array(t["foot"], dtype=np.float64), axis=0) for t in tracks])
     rng = np.random.default_rng(seed)
