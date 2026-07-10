@@ -170,6 +170,27 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             print(f"[debug] player {pid}: {pc[pid]} contacts, foot_y mean={fy:.1f} "
                   f"min={fy_min:.1f} max={fy_max:.1f} ({side})")
 
+    if debug and contacts and shuttle_court is not None:
+        # Placement diagnostic: where is each player placed vs where the shuttle
+        # actually is? A systematic large gap for one player means its warp is
+        # biased, which is what makes attribution (and the distance gate) fail.
+        sh = np.array(shuttle_court, dtype=np.float64)
+        for pid in players:
+            w = np.array(players[pid]["pose_court"])[:, 9:11]
+            foot = np.array(players[pid]["foot_court"], dtype=np.float64)
+            fvalid = ~np.any(np.isnan(foot), axis=1)
+            if fvalid.any():
+                fc = foot[fvalid]
+                print(f"[diag] player {pid}: foot_centroid=({fc[:,0].mean():.2f},{fc[:,1].mean():.2f}) "
+                      f"foot_x[{fc[:,0].min():.2f},{fc[:,0].max():.2f}] "
+                      f"foot_y[{fc[:,1].min():.2f},{fc[:,1].max():.2f}]")
+            wf = ~np.any(np.isnan(w.reshape(-1, 2)), axis=1) & ~np.any(np.isnan(sh), axis=1)
+            if wf.any():
+                d = np.linalg.norm(w.reshape(-1, 2)[wf] - sh[wf], axis=1)
+                print(f"[diag] player {pid}: mean_shuttle_dist={d.mean():.2f}m "
+                      f"median={np.median(d):.2f}m min={d.min():.2f}m max={d.max():.2f}m "
+                      f"frames_detected={int(wf.sum())}/{len(wf)}")
+
     print("[4/8] racket trajectories...")
     racket_streams = {p: players[p]["racket"] for p in players}
 
