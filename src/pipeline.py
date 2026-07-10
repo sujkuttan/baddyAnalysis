@@ -157,6 +157,30 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     attrib = [a for _, a in kept]
 
     if debug and contacts:
+        # Source x side breakdown: localize where the near/far bias comes from.
+        # Each merged contact is tagged by which raw detector(s) produced it.
+        near_s, ang_s, img_s = set(contacts_near), set(contacts_ang), set(contacts_img)
+        side_of = {}
+        for pid in players:
+            fyc = players[pid]["foot_court"]
+            v = fyc[~np.any(np.isnan(fyc), axis=1)]
+            side_of[pid] = "near" if (len(v) and v[:, 1].mean() > COURT_LENGTH / 2) else "far"
+        tally = {}
+        for c, a in zip(contacts, attrib):
+            src = "".join([
+                "N" if c in near_s else "",
+                "A" if c in ang_s else "",
+                "I" if c in img_s else "",
+            ]) or "-"
+            sd = side_of.get(a, "none")
+            tally[(src, sd)] = tally.get((src, sd), 0) + 1
+        print("[diag] contact source x attributed side (N=near-detector A=angle I=img):")
+        for (src, sd), n in sorted(tally.items(), key=lambda kv: -kv[1]):
+            print(f"[diag]   src={src:3s} side={sd:4s} n={n}")
+        near_n = sum(n for (s, sd), n in tally.items() if sd == "near")
+        far_n = sum(n for (s, sd), n in tally.items() if sd == "far")
+        print(f"[diag]   TOTAL attributed: near={near_n} far={far_n} "
+              f"(label truth in-range: ~28 near / 27 far)")
         pc = {}
         for a in attrib:
             pc[a] = pc.get(a, 0) + 1
