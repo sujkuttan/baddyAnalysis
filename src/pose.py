@@ -71,6 +71,11 @@ def collect_player_streams(frames, Hs):
 def build_frame_players(frames_all, H, K=None, foot_thresh=1.5, min_track_frac=0.005):
     """Merge fragmented tracker IDs into a small number of stable players.
 
+    If K is given (e.g. 2 for singles, 4 for doubles), fragment tracks are
+    clustered by floor position and merged into exactly K players, so one
+    physical player is not reported as several. Otherwise up to 6 tracks are
+    kept (legacy behaviour).
+
     Returns a dict pid -> {"pose_court":(N,17,2), "foot_court":(N,2),
     "pose_img":(N,17,2), "racket":(N,2)} all indexed by VIDEO FRAME (NaN where
     the player is not detected). All coordinates are warped with the single
@@ -118,7 +123,10 @@ def build_frame_players(frames_all, H, K=None, foot_thresh=1.5, min_track_frac=0
         if len(keep) < 2:
             keep = tracks[:2]
     else:
-        keep = tracks[:K]
+        # Known player count (singles/doubles): drop tiny fragments, then merge
+        # the rest into exactly K players by floor position.
+        cand = [t for t in tracks if len(t["frames"]) >= 10] or tracks
+        keep = _cluster_tracks_to_k(cand, K)
 
     players = {}
     for pi, t in enumerate(keep):
@@ -138,6 +146,56 @@ def build_frame_players(frames_all, H, K=None, foot_thresh=1.5, min_track_frac=0
             "racket": racket,
         }
     return players
+
+
+def _merge_frag_tracks(frag_tracks):
+    """Combine several fragment tracks (same physical player) into one, keeping
+    per-frame order."""
+    merged = {"frames": [], "pose_img": [], "pose_court": [], "foot": [], "last": None}
+    for t in frag_tracks:
+        merged["frames"].extend(t["frames"])
+        merged["pose_img"].extend(t["pose_img"])
+        merged["pose_court"].extend(t["pose_court"])
+        merged["foot"].extend(t["foot"])
+    order = np.argsort(np.array(merged["frames"]))
+    merged["frames"] = [merged["frames"][i] for i in order]
+    merged["pose_img"] = [merged["pose_img"][i] for i in order]
+    merged["pose_court"] = [merged["pose_court"][i] for i in order]
+    merged["foot"] = [merged["foot"][i] for i in order]
+    merged["last"] = merged["foot"][-1] if merged["foot"] else np.array([np.nan, np.nan])
+    return merged
+
+
+def _cluster_tracks_to_k(tracks, K, seed=0):
+    """Merge fragmented tracker IDs into exactly K players by clustering their
+    mean floor positions (K-means). For a singles (K=2) or doubles (K=4) match
+    this collapses per-player fragmentation from ByteTrack gaps."""
+    if len(tracks) <= K:
+        return tracks
+    cents = np.array(
+        [np.nanmean(np.array(t["foot"], dtype=np.float64), axis=0) for t in tracks])
+    rng = np.random.default_rng(seed)
+    idx0 = rng.integers(len(cents))
+    centers = [cents[idx0]]
+    for _ in range(1, K):
+        d = np.min([np.sum((cents - c) ** 2, axis=1) for c in centers], axis=0)
+        if d.sum() == 0:
+            d = np.ones(len(cents))
+        probs = d / d.sum()
+        centers.append(cents[rng.choice(len(cents), p=probs)])
+    centers = np.array(centers, dtype=np.float64)
+    for _ in range(20):
+        dist = np.stack([np.sum((cents - c) ** 2, axis=1) for c in centers])
+        labels = np.argmin(dist, axis=0)
+        for k in range(K):
+            m = labels == k
+            if m.any():
+                centers[k] = cents[m].mean(axis=0)
+    out = []
+    for k in range(K):
+        grp = [tracks[i] for i in range(len(tracks)) if labels[i] == k]
+        out.append(_merge_frag_tracks(grp))
+    return out
 
 
 def load_pose_model(pose_model="yolov8s-pose.pt", device="cpu"):

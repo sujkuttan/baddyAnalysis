@@ -124,7 +124,14 @@ def train_classifier(samples_train, samples_val, n_classes, epochs=40, lr=1e-3, 
             samples_train[0]["mbh"].shape[1]]
     model = FusionClassifier(dims, n_classes).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    loss_fn = nn.CrossEntropyLoss()
+    # Class-balanced weights so the majority class ("block", ~19% of labels)
+    # does not dominate predictions on the small training set.
+    labels = np.array([s["label"] for s in samples_train], dtype=np.int64)
+    counts = np.bincount(labels, minlength=n_classes).astype(np.float64)
+    counts[counts == 0] = 1.0
+    w = (1.0 / counts) * (n_classes / counts.sum())
+    weight_t = torch.tensor(w, dtype=torch.float32, device=device)
+    loss_fn = nn.CrossEntropyLoss(weight=weight_t)
     for ep in range(epochs):
         model.train()
         for s in samples_train:

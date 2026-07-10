@@ -55,6 +55,7 @@ def cmd_pipeline(args):
         inpaintnet_weights=args.inpaintnet, use_mbh=args.mbh,
         llm_provider=args.llm_provider, llm_key=args.llm_key,
         max_frames=args.max_frames, batch_size=args.batch_size, debug=args.debug,
+        max_players=args.max_players,
     )
 
 
@@ -130,6 +131,8 @@ def main():
     p.add_argument("--mbh", action="store_true")
     p.add_argument("--max_frames", type=int, default=DEFAULT_LOCAL_FRAMES, help="limit frames (quick test)")
     p.add_argument("--batch_size", type=int, default=DEFAULT_LOCAL_BATCH_SIZE, help="frames per batch")
+    p.add_argument("--max_players", type=int, default=None,
+                   help="known player count (2=singles, 4=doubles); merges fragmented tracks into K players")
     p.add_argument("--debug", action="store_true", help="print shuttle/contact/label diagnostics")
     p.add_argument("--llm_provider", default=None)
     p.add_argument("--llm_key", default=None)

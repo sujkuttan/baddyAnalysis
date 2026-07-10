@@ -22,9 +22,9 @@ def _wrist_stream(players, pid):
 
 
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
-                      device="cpu", tracknet_weights=None, inpaintnet_weights=None,
-                      use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
-                      batch_size=128, debug=False):
+                       device="cpu", tracknet_weights=None, inpaintnet_weights=None,
+                       use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
+                       batch_size=128, debug=False, max_players=None):
     import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
@@ -77,7 +77,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     print("  processed %d frames" % len(Hs))
 
     print("  consolidating tracker fragments into players (stable global H)...")
-    players = posemod.build_frame_players(frames_all, H0)
+    players = posemod.build_frame_players(frames_all, H0, K=max_players)
 
     print("[3/8] shuttle tracking + contact detection...")
     shuttle_px = np.array(shuttle_img, dtype=np.float64)
@@ -133,6 +133,26 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     if len(contacts) == 0:
         print("WARNING: 0 shuttle contacts detected. Check TrackNet weights and shuttle coverage.")
     attrib = biomech.attribute_contact(contacts, {p: players[p]["pose_court"] for p in players}, shuttle_court)
+    # Drop contacts with no attributed player: a real hit always has a hitter,
+    # so unattributed contacts are false positives (drives over-counting).
+    if len(contacts) != len(attrib):
+        attrib = list(attrib) + [None] * (len(contacts) - len(attrib))
+    kept = [(c, a) for c, a in zip(contacts, attrib) if a is not None]
+    contacts = [c for c, _ in kept]
+    attrib = [a for _, a in kept]
+
+    if debug and contacts:
+        pc = {}
+        for a in attrib:
+            pc[a] = pc.get(a, 0) + 1
+        for pid in sorted(pc, key=lambda p: int(p)):
+            fy = np.nanmean([
+                players[pid]["foot_court"][i, 1]
+                for i in range(len(players[pid]["foot_court"]))
+                if not np.any(np.isnan(players[pid]["foot_court"][i]))
+            ]) if pid in players else float("nan")
+            side = "near" if (not np.isnan(fy) and fy < COURT_LENGTH / 2) else "far"
+            print(f"[debug] player {pid}: {pc[pid]} contacts, mean_foot_y={fy:.1f} ({side})")
 
     print("[4/8] racket trajectories...")
     racket_streams = {p: players[p]["racket"] for p in players}
