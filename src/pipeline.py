@@ -176,7 +176,6 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         # biased, which is what makes attribution (and the distance gate) fail.
         sh = np.array(shuttle_court, dtype=np.float64)
         for pid in players:
-            w = np.array(players[pid]["pose_court"])[:, 9:11]
             foot = np.array(players[pid]["foot_court"], dtype=np.float64)
             fvalid = ~np.any(np.isnan(foot), axis=1)
             if fvalid.any():
@@ -184,12 +183,16 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                 print(f"[diag] player {pid}: foot_centroid=({fc[:,0].mean():.2f},{fc[:,1].mean():.2f}) "
                       f"foot_x[{fc[:,0].min():.2f},{fc[:,0].max():.2f}] "
                       f"foot_y[{fc[:,1].min():.2f},{fc[:,1].max():.2f}]")
-            wf = ~np.any(np.isnan(w.reshape(-1, 2)), axis=1) & ~np.any(np.isnan(sh), axis=1)
-            if wf.any():
-                d = np.linalg.norm(w.reshape(-1, 2)[wf] - sh[wf], axis=1)
-                print(f"[diag] player {pid}: mean_shuttle_dist={d.mean():.2f}m "
-                      f"median={np.median(d):.2f}m min={d.min():.2f}m max={d.max():.2f}m "
-                      f"frames_detected={int(wf.sum())}/{len(wf)}")
+            wrist = np.array(players[pid]["pose_court"])[:, 9:11]  # (N,2,2): wrist9,wrist10
+            d0 = np.linalg.norm(wrist[:, 0] - sh, axis=1)
+            d1 = np.linalg.norm(wrist[:, 1] - sh, axis=1)
+            d = np.fmin(np.where(np.isnan(d0), np.inf, d0),
+                        np.where(np.isnan(d1), np.inf, d1))
+            valid = np.isfinite(d)
+            if valid.any():
+                print(f"[diag] player {pid}: mean_shuttle_dist={d[valid].mean():.2f}m "
+                      f"median={np.median(d[valid]):.2f}m min={d[valid].min():.2f}m "
+                      f"max={d[valid].max():.2f}m frames_detected={int(valid.sum())}/{len(valid)}")
 
     print("[4/8] racket trajectories...")
     racket_streams = {p: players[p]["racket"] for p in players}
