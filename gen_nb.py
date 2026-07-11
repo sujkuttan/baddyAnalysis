@@ -96,8 +96,8 @@ SAMPLE_FRAMES = 3600
 # Pose model: default yolov8s-pose.pt. Use a larger model (e.g. yolov8m-pose.pt) or a
 # newer architecture for better detection of small/distant players. POSE_UPSCALE
 # enlarges each frame before pose detection (more pixels on distant players).
-POSE_MODEL = 'yolov8s-pose.pt'
-POSE_UPSCALE = 1.0
+POSE_MODEL = 'yolov8l-pose.pt'
+POSE_UPSCALE = 2.0
 POSE_CONF = 0.25
 # Known player count: 2 for singles, 4 for doubles. Forces fragmented tracker IDs
 # to merge into exactly this many players so one athlete is not split into several
