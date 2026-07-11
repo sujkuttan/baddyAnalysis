@@ -36,6 +36,25 @@ HALF_AWARE_GATE_M = 4.0
 # shuttle detections at hit instants that otherwise get missed.
 TRACKNET_HEAT_THRESH = 0.4
 
+# Court-region crop for TrackNet: crop each frame to the court bbox (+ margins,
+# grown to the model's 16:9 aspect) before the 512x288 resize, so the distant
+# far-court shuttle gets more effective pixels. OFF by default -- enable for an
+# A/B run once it is validated to help (small/far shuttle recovery). Margins are
+# fractions of court width (left/right) and court height (top/bottom); top is
+# large to keep aerial clears (which rise above the far baseline) inside the crop.
+# NOTE: only helps when the court does NOT already fill the frame. For a tightly
+# framed view (court ~= whole frame) the crop collapses to the full frame and is
+# a no-op; the far-court shuttle is small from perspective, not wasted border --
+# use a far-half tile (Phase C) or a larger img_size in that case.
+TRACKNET_COURT_CROP = False
+TRACKNET_CROP_MARGINS = {"left": 0.15, "right": 0.15, "top": 0.25, "bottom": 0.1}
+
+# Image-space shuttle velocity gate: null detections whose pixel displacement
+# from a robust local (median-of-neighbors) estimate exceeds this many px/frame.
+# Removes false teleport detections (on players/background) that warp far
+# off-court, while keeping smoothly-moving real (incl. aerial) detections.
+SHUTTLE_IMG_MAX_STEP_PX = 250.0
+
 COURT_CORNERS_METERS = np.array(
     [
         [0.0, 0.0],

@@ -11,7 +11,8 @@ from . import inpaintnet as inpaintmod
 from .config import (STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH,
                      validate_court_corners, OOB_MARGIN_M, MAX_SHUTTLE_SPEED_MPS,
                      IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH, ATTRIB_MAX_DIST_M,
-                     HALF_AWARE_ATTRIB, HALF_AWARE_TOL_M, HALF_AWARE_GATE_M)
+                     HALF_AWARE_ATTRIB, HALF_AWARE_TOL_M, HALF_AWARE_GATE_M,
+                     TRACKNET_COURT_CROP, TRACKNET_CROP_MARGINS, SHUTTLE_IMG_MAX_STEP_PX)
 
 
 def _wrist_stream(players, pid):
@@ -22,11 +23,39 @@ def _wrist_stream(players, pid):
     return np.array(seq, dtype=np.float64)
 
 
+def _court_crop_rect(corners, margins, aspect=512.0 / 288.0):
+    """Crop rect (x0, y0, x1, y1) in image pixels around the court: bbox of the
+    corners, expanded by `margins` (fractions of court w/h), then grown to the
+    model's `aspect` so the resize does not distort the shuttle. Not clamped to
+    the frame here -- the shuttle tracker clamps at runtime once the frame size
+    is known."""
+    pts = np.array(corners, dtype=np.float64)
+    x0, y0 = pts[:, 0].min(), pts[:, 1].min()
+    x1, y1 = pts[:, 0].max(), pts[:, 1].max()
+    cw, ch = x1 - x0, y1 - y0
+    x0 -= margins.get("left", 0.0) * cw
+    x1 += margins.get("right", 0.0) * cw
+    y0 -= margins.get("top", 0.0) * ch
+    y1 += margins.get("bottom", 0.0) * ch
+    w, h = x1 - x0, y1 - y0
+    # Grow the shorter dimension so w/h == aspect (letterbox, no stretch).
+    if w / h < aspect:
+        target_w = aspect * h
+        cx = (x0 + x1) / 2.0
+        x0, x1 = cx - target_w / 2.0, cx + target_w / 2.0
+    else:
+        target_h = w / aspect
+        cy = (y0 + y1) / 2.0
+        y0, y1 = cy - target_h / 2.0, cy + target_h / 2.0
+    return (x0, y0, x1, y1)
+
+
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                        device="cpu", tracknet_weights=None, inpaintnet_weights=None,
                        use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
                        batch_size=128, debug=False, max_players=None,
-                       pose_model="yolov8s-pose.pt", pose_upscale=1.0, pose_conf=0.25):
+                       pose_model="yolov8s-pose.pt", pose_upscale=1.0, pose_conf=0.25,
+                       tracknet_crop=TRACKNET_COURT_CROP):
     import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
@@ -39,7 +68,12 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     state = stabilize.init_stabilizer_state(corners)
     H0 = state["H0"]
     model = posemod.load_pose_model(pose_model, device=device)
-    tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device, heat_thresh=TRACKNET_HEAT_THRESH) if tracknet_weights else None
+    crop_rect = _court_crop_rect(corners, TRACKNET_CROP_MARGINS) if tracknet_crop else None
+    if debug and crop_rect is not None:
+        print("[diag] tracknet_crop=(%.0f,%.0f,%.0f,%.0f)" % crop_rect)
+    tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device,
+                                          heat_thresh=TRACKNET_HEAT_THRESH,
+                                          crop=crop_rect) if tracknet_weights else None
     if tracknet is None:
         print("WARNING: TrackNet weights NOT provided (tracknet_weights=None). "
               "Shuttle detection is disabled -> contacts=0 and stroke classification "
@@ -84,6 +118,13 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     print("[3/8] shuttle tracking + contact detection...")
     shuttle_px = np.array(shuttle_img, dtype=np.float64)
     tracknet_valid = int(np.sum(~np.isnan(shuttle_px).any(axis=1)))
+    # Image-space velocity gate: drop false teleport detections (they warp far
+    # off-court) before rectification/warp, keeping smooth real/aerial detections.
+    shuttle_px, img_gated = shuttlemod.gate_image_velocity(
+        shuttle_px, max_step_px=SHUTTLE_IMG_MAX_STEP_PX)
+    if debug:
+        print(f"[diag] image_velocity_gate removed={img_gated} "
+              f"(max_step={SHUTTLE_IMG_MAX_STEP_PX}px)")
     raw_tracknet_mask = ~np.isnan(shuttle_px).any(axis=1)  # real detections, pre-rectify
     if inpaintnet is not None and frame_hw is not None:
         shuttle_px = inpaintmod.rectify_trajectory(

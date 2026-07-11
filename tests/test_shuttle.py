@@ -24,6 +24,7 @@ class TrackNetShuttleBatchingTest(unittest.TestCase):
         tracker = TrackNetShuttle.__new__(TrackNetShuttle)
         tracker.seq_len = 3
         tracker.img_size = (4, 4)
+        tracker.crop = None
         tracker._buf = []
 
         calls = []

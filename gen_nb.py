@@ -103,15 +103,20 @@ POSE_CONF = 0.25
 # to merge into exactly this many players so one athlete is not split into several
 # phantom tracks (which breaks contact attribution). The sample video is singles.
 MAX_PLAYERS = 2
+# Crop each frame to the court region before the TrackNet resize (more pixels on
+# the distant far-court shuttle). OFF by default -- flip to True for an A/B run
+# and compare shuttle_nonnan% and the [diag] labeled-frame shuttle raw_miss.
+TRACKNET_CROP = False
 print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES}, '
       f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE}, pose_conf={POSE_CONF}, '
-      f'max_players={MAX_PLAYERS} ---')
+      f'max_players={MAX_PLAYERS}, tracknet_crop={TRACKNET_CROP} ---')
 res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',
     labels_csv='labels_import.csv', device=device,
     tracknet_weights=tracknet, inpaintnet_weights=inpaintnet, batch_size=BATCH_SIZE,
     max_frames=SAMPLE_FRAMES, debug=True, max_players=MAX_PLAYERS,
     pose_model=POSE_MODEL, pose_upscale=POSE_UPSCALE, pose_conf=POSE_CONF,
+    tracknet_crop=TRACKNET_CROP,
 )
 print('predictions:', res['predictions_csv'])
 print('metrics:', res['metrics'])''')

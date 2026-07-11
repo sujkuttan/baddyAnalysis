@@ -93,11 +93,15 @@ class TrackNetShuttle:
     largest connected-component centroid per ensembled heatmap.
     """
 
-    def __init__(self, model_path=None, device="cuda", img_size=(288, 512), seq_len=8, heat_thresh=0.5):
+    def __init__(self, model_path=None, device="cuda", img_size=(288, 512), seq_len=8,
+                 heat_thresh=0.5, crop=None):
         self.device = device
         self.img_size = img_size
         self.seq_len = seq_len
         self.heat_thresh = heat_thresh
+        # Optional fixed crop (x0, y0, x1, y1) in full-frame pixels applied before
+        # the model resize. None -> use the whole frame (identical to legacy).
+        self.crop = tuple(int(round(v)) for v in crop) if crop is not None else None
         self._buf = []
         self.model = TrackNet(in_channels=(seq_len + 1) * 3, out_channels=seq_len)
         if model_path is not None:
@@ -136,6 +140,26 @@ class TrackNetShuttle:
             w[s - i - 1] = i + 1
         self.weight = w / w.sum()
 
+    def _crop_box(self, fw, fh):
+        """Effective crop rect (x0, y0, x1, y1) clamped to the frame. Full frame
+        when no crop is configured."""
+        if self.crop is None:
+            return 0, 0, fw, fh
+        x0, y0, x1, y1 = self.crop
+        x0 = max(0, min(x0, fw - 1))
+        y0 = max(0, min(y0, fh - 1))
+        x1 = max(x0 + 1, min(x1, fw))
+        y1 = max(y0 + 1, min(y1, fh))
+        return x0, y0, x1, y1
+
+    def _prep(self, f):
+        """Crop (if configured) then resize a BGR frame to the model input size."""
+        Hh, Ww = self.img_size
+        if self.crop is not None:
+            x0, y0, x1, y1 = self._crop_box(f.shape[1], f.shape[0])
+            f = f[y0:y1, x0:x1]
+        return cv2.resize(f, (Ww, Hh))
+
     def _build_input(self, window_small, bg):
         """window_small: list of seq_len already-resized (Hh,Ww,3) float32 frames;
         bg: median (Hh,Ww,3) uint8 frame. Returns (1, (seq_len+1)*3, H, W) tensor in
@@ -162,7 +186,7 @@ class TrackNetShuttle:
             ret, f = cap.read()
             if not ret:
                 break
-            im = cv2.resize(f, (Ww, Hh))
+            im = self._prep(f)
             small.append(im)
             sum_arr = im.astype(np.float64) if sum_arr is None else sum_arr + im
             n += 1
@@ -218,6 +242,10 @@ class TrackNetShuttle:
                 _add_heat(start, h)
                 del x, h
 
+        # Map model-space coords back to full-frame pixels, accounting for the
+        # crop origin/extent (identity when no crop is configured).
+        x0, y0, x1, y1 = self._crop_box(fw, fh)
+        cw, ch = x1 - x0, y1 - y0
         coords = []
         for i in range(n):
             if wsum[i] == 0:
@@ -227,7 +255,7 @@ class TrackNetShuttle:
             if c is None:
                 coords.append([np.nan, np.nan])
             else:
-                coords.append([c[0] / Ww * fw, c[1] / Hh * fh])
+                coords.append([x0 + c[0] / Ww * cw, y0 + c[1] / Hh * ch])
         return np.array(coords, dtype=np.float64)
 
     def predict_frames(self, frames):
@@ -253,14 +281,44 @@ class TrackNetShuttle:
             return np.array([], dtype=np.float64)
         Hh, Ww = self.img_size
         fw, fh = frames[-1].shape[1], frames[-1].shape[0]
-        # Resize to model size up front and drop full-res frames (RAM guard).
-        small = [cv2.resize(f, (Ww, Hh)) for f in frames]
+        # Crop (if configured) + resize to model size up front and drop full-res
+        # frames (RAM guard).
+        small = [self._prep(f) for f in frames]
         del frames
         sum_arr = None
         for im in small:
             sum_arr = im.astype(np.float64) if sum_arr is None else sum_arr + im
         bg = (sum_arr / max(len(small), 1)).astype(np.uint8)
         return self._predict_from_small(small, bg, fw, fh)
+
+
+def gate_image_velocity(shuttle_px, max_step_px=250.0):
+    """Null image-space detections that spike far from BOTH adjacent detections.
+
+    A real shuttle moves smoothly in image space (even fast smashes are locally
+    continuous in one direction), so a point that is far from BOTH its previous
+    and next valid detections is an out-and-back teleport -- a false positive
+    (detection on a player/background) that, once warped, blows up off-court.
+    Requiring both sides avoids removing genuine fast motion (which stays close
+    to one neighbour) and avoids a teleport poisoning a median. First/last valid
+    points (only one neighbour) are kept. Returns (gated_copy, n_removed).
+    """
+    src = np.array(shuttle_px, dtype=np.float64)
+    out = src.copy()
+    n = len(src)
+    valid = ~np.isnan(src).any(axis=1)
+    idx = [i for i in range(n) if valid[i]]
+    kill = []
+    for k in range(1, len(idx) - 1):
+        i = idx[k]
+        prev_p, next_p = src[idx[k - 1]], src[idx[k + 1]]
+        d_prev = float(np.linalg.norm(src[i] - prev_p))
+        d_next = float(np.linalg.norm(src[i] - next_p))
+        if d_prev > max_step_px and d_next > max_step_px:
+            kill.append(i)
+    for i in kill:
+        out[i] = np.nan
+    return out, len(kill)
 
 
 def cap_speed(shuttle, fps, max_mps=100.0, window=1):

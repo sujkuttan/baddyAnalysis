@@ -57,6 +57,7 @@ def cmd_pipeline(args):
         max_frames=args.max_frames, batch_size=args.batch_size, debug=args.debug,
         max_players=args.max_players, pose_model=args.pose_model,
         pose_upscale=args.pose_upscale, pose_conf=args.pose_conf,
+        tracknet_crop=args.tracknet_crop,
     )
 
 
@@ -143,6 +144,9 @@ def main():
     p.add_argument("--pose_conf", type=float, default=0.25,
                    help="YOLO pose detection confidence threshold (default 0.25); lower "
                         "it (e.g. 0.1) to recover faint/small distant players")
+    p.add_argument("--tracknet_crop", action="store_true",
+                   help="crop each frame to the court region (+margins, 16:9) before the "
+                        "TrackNet resize, giving the distant far-court shuttle more pixels")
     p.add_argument("--debug", action="store_true", help="print shuttle/contact/label diagnostics")
     p.add_argument("--llm_provider", default=None)
     p.add_argument("--llm_key", default=None)
