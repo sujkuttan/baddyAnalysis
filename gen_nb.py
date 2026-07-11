@@ -99,13 +99,18 @@ SAMPLE_FRAMES = 3600
 POSE_MODEL = 'yolov8s-pose.pt'
 POSE_UPSCALE = 1.0
 POSE_CONF = 0.25
+# Known player count: 2 for singles, 4 for doubles. Forces fragmented tracker IDs
+# to merge into exactly this many players so one athlete is not split into several
+# phantom tracks (which breaks contact attribution). The sample video is singles.
+MAX_PLAYERS = 2
 print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES}, '
-      f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE}, pose_conf={POSE_CONF} ---')
+      f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE}, pose_conf={POSE_CONF}, '
+      f'max_players={MAX_PLAYERS} ---')
 res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',
     labels_csv='labels_import.csv', device=device,
     tracknet_weights=tracknet, inpaintnet_weights=inpaintnet, batch_size=BATCH_SIZE,
-    max_frames=SAMPLE_FRAMES, debug=True,
+    max_frames=SAMPLE_FRAMES, debug=True, max_players=MAX_PLAYERS,
     pose_model=POSE_MODEL, pose_upscale=POSE_UPSCALE, pose_conf=POSE_CONF,
 )
 print('predictions:', res['predictions_csv'])
