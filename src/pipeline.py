@@ -84,6 +84,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     print("[3/8] shuttle tracking + contact detection...")
     shuttle_px = np.array(shuttle_img, dtype=np.float64)
     tracknet_valid = int(np.sum(~np.isnan(shuttle_px).any(axis=1)))
+    raw_tracknet_mask = ~np.isnan(shuttle_px).any(axis=1)  # real detections, pre-rectify
     if inpaintnet is not None and frame_hw is not None:
         shuttle_px = inpaintmod.rectify_trajectory(
             shuttle_px, frame_hw[1], frame_hw[0], inpaintnet, device=device, seq_len=16)
@@ -103,6 +104,18 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         cly = shuttle_court[oob, 1]
         print(f"[diag] OOB extent: x[{np.nanmin(clx):.2f},{np.nanmax(clx):.2f}] "
               f"y[{np.nanmin(cly):.2f},{np.nanmax(cly):.2f}] (margin={OOB_MARGIN_M})")
+        # Decompose the OOB loss: were the clipped points REAL TrackNet detections
+        # (signal we're throwing away) or InpaintNet-fabricated interpolations? And
+        # are they far-half aerial (negative y = above/behind the far baseline),
+        # which the court-FLOOR homography wrongly extrapolates off-court?
+        oob_real = int(np.sum(oob & raw_tracknet_mask))
+        oob_fab = int(np.sum(oob & ~raw_tracknet_mask))
+        y_neg = int(np.sum(oob & (shuttle_court[:, 1] < -OOB_MARGIN_M)))   # beyond far baseline
+        y_pos = int(np.sum(oob & (shuttle_court[:, 1] > COURT_LENGTH + OOB_MARGIN_M)))
+        x_oob = int(np.sum(oob & ((shuttle_court[:, 0] < -OOB_MARGIN_M) |
+                                  (shuttle_court[:, 0] > COURT_WIDTH + OOB_MARGIN_M))))
+        print(f"[diag] OOB breakdown: real_tracknet={oob_real} inpaint_fabricated={oob_fab} | "
+              f"beyond_far_baseline(y<0)={y_neg} beyond_near_baseline(y>L)={y_pos} sideways(x)={x_oob}")
     shuttle_court[oob] = np.nan
     oob_clipped = pre_oob - int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     # Filter wild in-bounds detections (teleports) the OOB box missed.
