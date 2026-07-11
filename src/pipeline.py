@@ -116,6 +116,33 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                                   (shuttle_court[:, 0] > COURT_WIDTH + OOB_MARGIN_M))))
         print(f"[diag] OOB breakdown: real_tracknet={oob_real} inpaint_fabricated={oob_fab} | "
               f"beyond_far_baseline(y<0)={y_neg} beyond_near_baseline(y>L)={y_pos} sideways(x)={x_oob}")
+    # For labeled frames whose final shuttle is invalid: was it a RAW TrackNet
+    # miss (detection problem) or a real detection lost to OOB clipping (warp
+    # problem)? These need opposite fixes; localize before changing OOB logic.
+    if debug and labels_csv and os.path.exists(labels_csv):
+        import csv as _csv
+        lf = []
+        for r in _csv.DictReader(open(labels_csv)):
+            if r.get("label_status") == "labeled":
+                try:
+                    lf.append((int(float(r["frame"])), r.get("side", "?")))
+                except Exception:
+                    pass
+        raw_miss = clip_loss = ok = 0
+        for f, side in lf:
+            if f >= len(shuttle_court):
+                continue
+            has_val = not np.any(np.isnan(shuttle_court[f]))  # pre-clip value present
+            if has_val and not oob[f]:
+                ok += 1
+            elif oob[f]:
+                clip_loss += 1  # warped in but OOB-clipped (real or fabricated)
+            elif f < len(raw_tracknet_mask) and not raw_tracknet_mask[f]:
+                raw_miss += 1   # TrackNet never detected it
+            else:
+                raw_miss += 1
+        print(f"[diag] labeled-frame shuttle: ok={ok} raw_tracknet_miss={raw_miss} "
+              f"oob_clip_loss={clip_loss} (of {len(lf)} labels)")
     shuttle_court[oob] = np.nan
     oob_clipped = pre_oob - int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     # Filter wild in-bounds detections (teleports) the OOB box missed.
