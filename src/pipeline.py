@@ -125,6 +125,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     Hs = []
     frames_all = []
     shuttle_img = []
+    far_img = []
     frame_hw = None
     n_read = 0
     cap_max = max_frames if max_frames is not None else float("inf")
@@ -149,6 +150,13 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             shuttle_img.extend(tracknet.predict_frames(batch))
         else:
             shuttle_img.extend([[np.nan, np.nan]] * len(batch))
+        # Phase C: a second TrackNet pass on the far-court tile, run here (inside
+        # the loop) on the real frames before they are discarded by the RAM guard.
+        # Mirrors the main tracknet call so the internal seq-len context is correct.
+        if far_net is not None:
+            far_img.extend(far_net.predict_frames(batch))
+        else:
+            far_img.extend([[np.nan, np.nan]] * len(batch))
         del batch
     cap.release()
     Hs = np.array(Hs)
@@ -167,11 +175,11 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     if debug:
         print(f"[diag] image_velocity_gate removed={img_gated} "
               f"(max_step={SHUTTLE_IMG_MAX_STEP_PX}px)")
-    # Phase C: second TrackNet pass on the far-court tile, trusted over the
-    # full-frame pass where the shuttle is in the far (top) image half. Gives the
-    # perspective-compressed far shuttle ~2x pixels.
-    if far_net is not None and frame_hw is not None and len(shuttle_img):
-        far_px = far_net.predict_frames(list(shuttle_img))
+    # Phase C: second TrackNet pass on the far-court tile (run per-batch above on
+    # the real frames), trusted over the full-frame pass where the shuttle is in the
+    # far (top) image half. Gives the perspective-compressed far shuttle ~2x pixels.
+    if far_net is not None and frame_hw is not None and len(far_img):
+        far_px = np.array(far_img, dtype=np.float64)
         far_px, _ = shuttlemod.gate_image_velocity(far_px, max_step_px=SHUTTLE_IMG_MAX_STEP_PX)
         net_y = float(np.mean([c[1] for c in corners]))
         shuttle_px, far_used = _merge_far_tile(shuttle_px, far_px, net_y)
