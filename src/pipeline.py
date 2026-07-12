@@ -13,7 +13,7 @@ from .config import (STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH,
                      IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH, ATTRIB_MAX_DIST_M,
                      HALF_AWARE_ATTRIB, HALF_AWARE_TOL_M, HALF_AWARE_GATE_M,
                      TRACKNET_COURT_CROP, TRACKNET_CROP_MARGINS, SHUTTLE_IMG_MAX_STEP_PX,
-                     TRACKNET_FAR_TILE, TRACKNET_FAR_MARGINS)
+                     TRACKNET_FAR_TILE, TRACKNET_FAR_MARGINS, TRACKNET_IMG_SIZE)
 
 
 def _wrist_stream(players, pid):
@@ -81,7 +81,8 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                        use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
                        batch_size=128, debug=False, max_players=None,
                        pose_model="yolov8s-pose.pt", pose_upscale=1.0, pose_conf=0.25,
-                       tracknet_crop=TRACKNET_COURT_CROP, far_tile=TRACKNET_FAR_TILE):
+                       tracknet_crop=TRACKNET_COURT_CROP, far_tile=TRACKNET_FAR_TILE,
+                       tracknet_img_size=TRACKNET_IMG_SIZE):
     import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
@@ -94,20 +95,22 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     state = stabilize.init_stabilizer_state(corners)
     H0 = state["H0"]
     model = posemod.load_pose_model(pose_model, device=device)
-    crop_rect = _court_crop_rect(corners, TRACKNET_CROP_MARGINS) if tracknet_crop else None
+    img_h, img_w = tracknet_img_size
+    aspect = float(img_w) / float(img_h)
+    crop_rect = _court_crop_rect(corners, TRACKNET_CROP_MARGINS, aspect=aspect) if tracknet_crop else None
     if debug and crop_rect is not None:
         print("[diag] tracknet_crop=(%.0f,%.0f,%.0f,%.0f)" % crop_rect)
     tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device,
                                           heat_thresh=TRACKNET_HEAT_THRESH,
-                                          crop=crop_rect) if tracknet_weights else None
+                                          crop=crop_rect, img_size=tracknet_img_size) if tracknet_weights else None
     # Phase C: a second TrackNet pass cropped to the far court, for ~2x pixels on
     # the perspective-compressed far shuttle. Merged below after both passes run.
-    far_rect = _court_far_rect(corners, TRACKNET_FAR_MARGINS) if far_tile else None
+    far_rect = _court_far_rect(corners, TRACKNET_FAR_MARGINS, aspect=aspect) if far_tile else None
     if debug and far_rect is not None:
         print("[diag] tracknet_far_tile=(%.0f,%.0f,%.0f,%.0f)" % far_rect)
     far_net = shuttlemod.TrackNetShuttle(tracknet_weights, device=device,
                                          heat_thresh=TRACKNET_HEAT_THRESH,
-                                         crop=far_rect) if (far_tile and tracknet_weights) else None
+                                         crop=far_rect, img_size=tracknet_img_size) if (far_tile and tracknet_weights) else None
     if tracknet is None:
         print("WARNING: TrackNet weights NOT provided (tracknet_weights=None). "
               "Shuttle detection is disabled -> contacts=0 and stroke classification "

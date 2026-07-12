@@ -103,24 +103,29 @@ POSE_CONF = 0.25
 # to merge into exactly this many players so one athlete is not split into several
 # phantom tracks (which breaks contact attribution). The sample video is singles.
 MAX_PLAYERS = 2
-# Crop each frame to the court region before the TrackNet resize (more pixels on
-# the distant far-court shuttle). OFF by default -- flip to True for an A/B run
-# and compare shuttle_nonnan% and the [diag] labeled-frame shuttle raw_miss.
+# --- TrackNet resolution levers (A/B/C sweep) ---
+# A (img_size): TrackNet input resolution (H,W). Official weights train at 288x512.
+# Raising this (e.g. (384,682), must stay /8) gives the far shuttle more pixels
+# globally at higher GPU cost. Keep (288,512) to stay in-distribution.
+TRACKNET_IMG_SIZE = (288, 512)
+# B (court crop): crop each frame to the court region before the resize (more
+# pixels on the distant far shuttle). OFF -- the sample video already fills the
+# frame, so this is a no-op here; useful only for wide-angle footage.
 TRACKNET_CROP = False
-# Far-court zoom tile (Phase C): second TrackNet pass on the far court for ~2x
-# pixels on the far shuttle; trusted in the far half. OFF by default; flip True
-# for an A/B run and compare the [diag] labeled-frame shuttle raw_miss / far count.
+# C (far-court tile): second TrackNet pass on the far court (+headroom) for ~2x
+# pixels on the far shuttle; trusted in the far half. Flip True for an A/B run.
 FAR_TILE = False
 print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES}, '
       f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE}, pose_conf={POSE_CONF}, '
-      f'max_players={MAX_PLAYERS}, tracknet_crop={TRACKNET_CROP} ---')
+      f'max_players={MAX_PLAYERS}, tracknet_img_size={TRACKNET_IMG_SIZE}, '
+      f'tracknet_crop={TRACKNET_CROP}, far_tile={FAR_TILE} ---')
 res = pipeline.run_full_pipeline(
     video_name, corners, out_dir='data',
     labels_csv='labels_import.csv', device=device,
     tracknet_weights=tracknet, inpaintnet_weights=inpaintnet, batch_size=BATCH_SIZE,
     max_frames=SAMPLE_FRAMES, debug=True, max_players=MAX_PLAYERS,
     pose_model=POSE_MODEL, pose_upscale=POSE_UPSCALE, pose_conf=POSE_CONF,
-    tracknet_crop=TRACKNET_CROP, far_tile=FAR_TILE,
+    tracknet_crop=TRACKNET_CROP, far_tile=FAR_TILE, tracknet_img_size=TRACKNET_IMG_SIZE,
 )
 print('predictions:', res['predictions_csv'])
 print('metrics:', res['metrics'])''')

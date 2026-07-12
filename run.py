@@ -49,6 +49,14 @@ def require_pipeline_dependencies():
 def cmd_pipeline(args):
     require_pipeline_dependencies()
     corners = load_corners(args.corners, args.corners_order)
+    try:
+        img_h, img_w = (int(x) for x in args.tracknet_img_size.split(","))
+    except Exception:
+        img_h, img_w = 288, 512
+    if img_h % 8 or img_w % 8:
+        print("WARNING: --tracknet_img_size H,W must both be divisible by 8; "
+              f"got {img_h},{img_w} -> TrackNet may fail. Using 288,512.")
+        img_h, img_w = 288, 512
     pipeline.run_full_pipeline(
         args.video, corners, out_dir=args.out, labels_csv=args.labels,
         device=args.device, tracknet_weights=args.tracknet,
@@ -58,6 +66,7 @@ def cmd_pipeline(args):
         max_players=args.max_players, pose_model=args.pose_model,
         pose_upscale=args.pose_upscale, pose_conf=args.pose_conf,
         tracknet_crop=args.tracknet_crop, far_tile=args.far_tile,
+        tracknet_img_size=args.tracknet_img_size,
     )
 
 
@@ -150,6 +159,9 @@ def main():
     p.add_argument("--far_tile", action="store_true",
                    help="second TrackNet pass cropped to the far court (+headroom) for ~2x "
                         "pixels on the perspective-compressed far shuttle; trusted in far half")
+    p.add_argument("--tracknet_img_size", type=str, default="288,512",
+                   help="TrackNet input resolution 'H,W' (must be divisible by 8); "
+                        "higher = more pixels on the far shuttle (Option A), more GPU cost")
     p.add_argument("--debug", action="store_true", help="print shuttle/contact/label diagnostics")
     p.add_argument("--llm_provider", default=None)
     p.add_argument("--llm_key", default=None)

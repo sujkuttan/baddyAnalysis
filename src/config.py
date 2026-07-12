@@ -36,6 +36,12 @@ HALF_AWARE_GATE_M = 4.0
 # shuttle detections at hit instants that otherwise get missed.
 TRACKNET_HEAT_THRESH = 0.4
 
+# TrackNet input resolution (H, W). The official weights are trained at 288x512;
+# raising this (e.g. 384x682, must stay divisible by 8) gives the far shuttle more
+# pixels globally but costs ~scaling in GPU memory/compute. Option A in the A/B
+# sweep. Keep 288x512 for the default to stay in-distribution.
+TRACKNET_IMG_SIZE = (288, 512)
+
 # Court-region crop for TrackNet: crop each frame to the court bbox (+ margins,
 # grown to the model's 16:9 aspect) before the 512x288 resize, so the distant
 # far-court shuttle gets more effective pixels. OFF by default -- enable for an
