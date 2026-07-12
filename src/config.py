@@ -49,6 +49,14 @@ TRACKNET_HEAT_THRESH = 0.4
 TRACKNET_COURT_CROP = False
 TRACKNET_CROP_MARGINS = {"left": 0.15, "right": 0.15, "top": 0.25, "bottom": 0.1}
 
+# Far-half zoom tile (Phase C): run a SECOND TrackNet pass cropped to the far
+# court region (+ headroom) and union it with the full-frame pass. The far court
+# is perspective-compressed in the full frame, so this gives the distant shuttle
+# ~2x the effective pixels. OFF by default; enable for an A/B run. The far tile
+# is trusted over the full frame only where the shuttle is in the far court half.
+TRACKNET_FAR_TILE = False
+TRACKNET_FAR_MARGINS = {"left": 0.15, "right": 0.15, "top": 0.6, "bottom": -0.3}
+
 # Image-space shuttle velocity gate: null detections whose pixel displacement
 # from a robust local (median-of-neighbors) estimate exceeds this many px/frame.
 # Removes false teleport detections (on players/background) that warp far

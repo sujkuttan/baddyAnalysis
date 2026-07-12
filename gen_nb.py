@@ -107,6 +107,10 @@ MAX_PLAYERS = 2
 # the distant far-court shuttle). OFF by default -- flip to True for an A/B run
 # and compare shuttle_nonnan% and the [diag] labeled-frame shuttle raw_miss.
 TRACKNET_CROP = False
+# Far-court zoom tile (Phase C): second TrackNet pass on the far court for ~2x
+# pixels on the far shuttle; trusted in the far half. OFF by default; flip True
+# for an A/B run and compare the [diag] labeled-frame shuttle raw_miss / far count.
+FAR_TILE = False
 print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES}, '
       f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE}, pose_conf={POSE_CONF}, '
       f'max_players={MAX_PLAYERS}, tracknet_crop={TRACKNET_CROP} ---')
@@ -116,7 +120,7 @@ res = pipeline.run_full_pipeline(
     tracknet_weights=tracknet, inpaintnet_weights=inpaintnet, batch_size=BATCH_SIZE,
     max_frames=SAMPLE_FRAMES, debug=True, max_players=MAX_PLAYERS,
     pose_model=POSE_MODEL, pose_upscale=POSE_UPSCALE, pose_conf=POSE_CONF,
-    tracknet_crop=TRACKNET_CROP,
+    tracknet_crop=TRACKNET_CROP, far_tile=FAR_TILE,
 )
 print('predictions:', res['predictions_csv'])
 print('metrics:', res['metrics'])''')

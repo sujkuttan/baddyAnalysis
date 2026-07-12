@@ -57,7 +57,7 @@ def cmd_pipeline(args):
         max_frames=args.max_frames, batch_size=args.batch_size, debug=args.debug,
         max_players=args.max_players, pose_model=args.pose_model,
         pose_upscale=args.pose_upscale, pose_conf=args.pose_conf,
-        tracknet_crop=args.tracknet_crop,
+        tracknet_crop=args.tracknet_crop, far_tile=args.far_tile,
     )
 
 
@@ -147,6 +147,9 @@ def main():
     p.add_argument("--tracknet_crop", action="store_true",
                    help="crop each frame to the court region (+margins, 16:9) before the "
                         "TrackNet resize, giving the distant far-court shuttle more pixels")
+    p.add_argument("--far_tile", action="store_true",
+                   help="second TrackNet pass cropped to the far court (+headroom) for ~2x "
+                        "pixels on the perspective-compressed far shuttle; trusted in far half")
     p.add_argument("--debug", action="store_true", help="print shuttle/contact/label diagnostics")
     p.add_argument("--llm_provider", default=None)
     p.add_argument("--llm_key", default=None)

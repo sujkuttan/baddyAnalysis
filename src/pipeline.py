@@ -12,7 +12,8 @@ from .config import (STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH,
                      validate_court_corners, OOB_MARGIN_M, MAX_SHUTTLE_SPEED_MPS,
                      IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH, ATTRIB_MAX_DIST_M,
                      HALF_AWARE_ATTRIB, HALF_AWARE_TOL_M, HALF_AWARE_GATE_M,
-                     TRACKNET_COURT_CROP, TRACKNET_CROP_MARGINS, SHUTTLE_IMG_MAX_STEP_PX)
+                     TRACKNET_COURT_CROP, TRACKNET_CROP_MARGINS, SHUTTLE_IMG_MAX_STEP_PX,
+                     TRACKNET_FAR_TILE, TRACKNET_FAR_MARGINS)
 
 
 def _wrist_stream(players, pid):
@@ -50,12 +51,37 @@ def _court_crop_rect(corners, margins, aspect=512.0 / 288.0):
     return (x0, y0, x1, y1)
 
 
+def _court_far_rect(corners, margins, aspect=512.0 / 288.0):
+    """Crop rect for the FAR half of the court (top region) + headroom, grown to
+    the model aspect. Gives the perspective-compressed far court ~2x the pixels
+    of a full-frame pass. `bottom` margin is negative here: extend below the net
+    for continuity/dedup with the full-frame pass."""
+    return _court_crop_rect(corners, margins, aspect=aspect)
+
+
+def _merge_far_tile(full_px, far_px, net_y):
+    """Merge the far-court tile pass into the full-frame detections.
+
+    Where the far-tile pass has a valid detection in the far (top, image-y < net_y)
+    half, trust it over the full-frame detection (it has ~2x the pixels there).
+    Else keep the full-frame value. Returns (merged, n_far_trusted)."""
+    full = np.array(full_px, dtype=np.float64)
+    far = np.array(far_px, dtype=np.float64)
+    if far.shape != full.shape:
+        return full, 0
+    out = full.copy()
+    fv = ~np.isnan(far).any(axis=1)
+    trust = fv & (far[:, 1] < net_y)
+    out[trust] = far[trust]
+    return out, int(np.sum(trust))
+
+
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                        device="cpu", tracknet_weights=None, inpaintnet_weights=None,
                        use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
                        batch_size=128, debug=False, max_players=None,
                        pose_model="yolov8s-pose.pt", pose_upscale=1.0, pose_conf=0.25,
-                       tracknet_crop=TRACKNET_COURT_CROP):
+                       tracknet_crop=TRACKNET_COURT_CROP, far_tile=TRACKNET_FAR_TILE):
     import cv2
     os.makedirs(out_dir, exist_ok=True)
     if str(device) == "cuda" and not torch.cuda.is_available():
@@ -74,6 +100,14 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     tracknet = shuttlemod.TrackNetShuttle(tracknet_weights, device=device,
                                           heat_thresh=TRACKNET_HEAT_THRESH,
                                           crop=crop_rect) if tracknet_weights else None
+    # Phase C: a second TrackNet pass cropped to the far court, for ~2x pixels on
+    # the perspective-compressed far shuttle. Merged below after both passes run.
+    far_rect = _court_far_rect(corners, TRACKNET_FAR_MARGINS) if far_tile else None
+    if debug and far_rect is not None:
+        print("[diag] tracknet_far_tile=(%.0f,%.0f,%.0f,%.0f)" % far_rect)
+    far_net = shuttlemod.TrackNetShuttle(tracknet_weights, device=device,
+                                         heat_thresh=TRACKNET_HEAT_THRESH,
+                                         crop=far_rect) if (far_tile and tracknet_weights) else None
     if tracknet is None:
         print("WARNING: TrackNet weights NOT provided (tracknet_weights=None). "
               "Shuttle detection is disabled -> contacts=0 and stroke classification "
@@ -125,6 +159,16 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     if debug:
         print(f"[diag] image_velocity_gate removed={img_gated} "
               f"(max_step={SHUTTLE_IMG_MAX_STEP_PX}px)")
+    # Phase C: second TrackNet pass on the far-court tile, trusted over the
+    # full-frame pass where the shuttle is in the far (top) image half. Gives the
+    # perspective-compressed far shuttle ~2x pixels.
+    if far_net is not None and frame_hw is not None and len(shuttle_img):
+        far_px = far_net.predict_frames(list(shuttle_img))
+        far_px, _ = shuttlemod.gate_image_velocity(far_px, max_step_px=SHUTTLE_IMG_MAX_STEP_PX)
+        net_y = float(np.mean([c[1] for c in corners]))
+        shuttle_px, far_used = _merge_far_tile(shuttle_px, far_px, net_y)
+        if debug:
+            print(f"[diag] far_tile merged={far_used} (trusted in far half, net_y={net_y:.0f})")
     raw_tracknet_mask = ~np.isnan(shuttle_px).any(axis=1)  # real detections, pre-rectify
     if inpaintnet is not None and frame_hw is not None:
         shuttle_px = inpaintmod.rectify_trajectory(
