@@ -96,6 +96,11 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     H0 = state["H0"]
     model = posemod.load_pose_model(pose_model, device=device)
     img_h, img_w = tracknet_img_size
+    if img_h % 8 or img_w % 8:
+        snh, snw = max(8, (img_h // 8) * 8), max(8, (img_w // 8) * 8)
+        print(f"WARNING: tracknet_img_size ({img_h},{img_w}) must be divisible by 8 "
+              f"(TrackNet U-Net /8); snapping to ({snh},{snw}).")
+        img_h, img_w = snh, snw
     aspect = float(img_w) / float(img_h)
     crop_rect = _court_crop_rect(corners, TRACKNET_CROP_MARGINS, aspect=aspect) if tracknet_crop else None
     if debug and crop_rect is not None:

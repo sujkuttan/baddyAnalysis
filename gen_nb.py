@@ -105,8 +105,9 @@ POSE_CONF = 0.25
 MAX_PLAYERS = 2
 # --- TrackNet resolution levers (A/B/C sweep) ---
 # A (img_size): TrackNet input resolution (H,W). Official weights train at 288x512.
-# Raising this (e.g. (384,682), must stay /8) gives the far shuttle more pixels
-# globally at higher GPU cost. Keep (288,512) to stay in-distribution.
+# Raising this (e.g. (384,680), both MUST be divisible by 8 -- the U-Net pools /8)
+# gives the far shuttle more pixels globally at higher GPU cost. Keep (288,512)
+# to stay in-distribution. (384,680) ~2.1x pixels; (384,688) also valid.
 TRACKNET_IMG_SIZE = (288, 512)
 # B (court crop): crop each frame to the court region before the resize (more
 # pixels on the distant far shuttle). OFF -- the sample video already fills the
