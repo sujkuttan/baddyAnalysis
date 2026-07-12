@@ -62,6 +62,10 @@ TRACKNET_CROP_MARGINS = {"left": 0.15, "right": 0.15, "top": 0.25, "bottom": 0.1
 # is trusted over the full frame only where the shuttle is in the far court half.
 TRACKNET_FAR_TILE = False
 TRACKNET_FAR_MARGINS = {"left": 0.15, "right": 0.15, "top": 0.6, "bottom": -0.3}
+# Far-tile decode threshold. Higher than the full pass because the zoom makes
+# background/player texture look shuttle-like; this cuts spurious fires that would
+# otherwise fill as false gaps.
+TRACKNET_FAR_HEAT_THRESH = 0.5
 
 # Image-space shuttle velocity gate: null detections whose pixel displacement
 # from a robust local (median-of-neighbors) estimate exceeds this many px/frame.

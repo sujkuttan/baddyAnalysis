@@ -13,7 +13,8 @@ from .config import (STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH,
                      IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH, ATTRIB_MAX_DIST_M,
                      HALF_AWARE_ATTRIB, HALF_AWARE_TOL_M, HALF_AWARE_GATE_M,
                      TRACKNET_COURT_CROP, TRACKNET_CROP_MARGINS, SHUTTLE_IMG_MAX_STEP_PX,
-                     TRACKNET_FAR_TILE, TRACKNET_FAR_MARGINS, TRACKNET_IMG_SIZE)
+                     TRACKNET_FAR_TILE, TRACKNET_FAR_MARGINS, TRACKNET_FAR_HEAT_THRESH,
+                     TRACKNET_IMG_SIZE)
 
 
 def _wrist_stream(players, pid):
@@ -62,18 +63,23 @@ def _court_far_rect(corners, margins, aspect=512.0 / 288.0):
 def _merge_far_tile(full_px, far_px, net_y):
     """Merge the far-court tile pass into the full-frame detections.
 
-    Where the far-tile pass has a valid detection in the far (top, image-y < net_y)
-    half, trust it over the full-frame detection (it has ~2x the pixels there).
-    Else keep the full-frame value. Returns (merged, n_far_trusted)."""
+    The far tile runs zoomed on the far court, so it is noisier (fires on
+    background/player texture). Trust it ONLY to FILL GAPS: where the full-frame
+    pass produced no detection (NaN) and the far tile has a valid hit in the far
+    (top, image-y < net_y) half, use the far tile. Never override a confident
+    full-frame detection -- doing so injected spurious off-court points. Where the
+    far tile detects in the near half it is ignored entirely (out of its region).
+    Returns (merged, n_far_filled)."""
     full = np.array(full_px, dtype=np.float64)
     far = np.array(far_px, dtype=np.float64)
     if far.shape != full.shape:
         return full, 0
     out = full.copy()
     fv = ~np.isnan(far).any(axis=1)
-    trust = fv & (far[:, 1] < net_y)
-    out[trust] = far[trust]
-    return out, int(np.sum(trust))
+    far_half = far[:, 1] < net_y
+    fill = fv & far_half & np.isnan(full).any(axis=1)
+    out[fill] = far[fill]
+    return out, int(np.sum(fill))
 
 
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
@@ -114,7 +120,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     if debug and far_rect is not None:
         print("[diag] tracknet_far_tile=(%.0f,%.0f,%.0f,%.0f)" % far_rect)
     far_net = shuttlemod.TrackNetShuttle(tracknet_weights, device=device,
-                                         heat_thresh=TRACKNET_HEAT_THRESH,
+                                         heat_thresh=TRACKNET_FAR_HEAT_THRESH,
                                          crop=far_rect, img_size=tracknet_img_size) if (far_tile and tracknet_weights) else None
     if tracknet is None:
         print("WARNING: TrackNet weights NOT provided (tracknet_weights=None). "

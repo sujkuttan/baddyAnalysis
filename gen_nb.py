@@ -114,7 +114,8 @@ TRACKNET_IMG_SIZE = (288, 512)
 # frame, so this is a no-op here; useful only for wide-angle footage.
 TRACKNET_CROP = False
 # C (far-court tile): second TrackNet pass on the far court (+headroom) for ~2x
-# pixels on the far shuttle; trusted in the far half. Flip True for an A/B run.
+# pixels on the far shuttle; used only to FILL GAPS the full-frame pass missed
+# (never overrides a confident detection). Flip True for an A/B run.
 FAR_TILE = False
 print(f'--- RUN: batch_size={BATCH_SIZE}, sample_frames={SAMPLE_FRAMES}, '
       f'pose_model={POSE_MODEL}, pose_upscale={POSE_UPSCALE}, pose_conf={POSE_CONF}, '
