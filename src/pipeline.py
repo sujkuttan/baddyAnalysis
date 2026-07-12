@@ -82,6 +82,29 @@ def _merge_far_tile(full_px, far_px, net_y):
     return out, int(np.sum(fill))
 
 
+def _labeled_recall(traj_px, Hs, H0, labels):
+    """Warp a trajectory's image coords to court at each labeled frame and classify
+    each as ok (in-bounds detection) / miss (no TrackNet detection) / clip (detected
+    but warped off-court). `labels` is a list of (frame, side). Used to A/B the
+    full-frame vs far-tile vs merged trajectories on labeled frames."""
+    ok = miss = clip = 0
+    traj = np.array(traj_px, dtype=np.float64)
+    for f, _side in labels:
+        if f >= len(traj) or f >= len(Hs):
+            continue
+        pt = traj[f]
+        if np.any(np.isnan(pt)):
+            miss += 1
+            continue
+        court = stabilize.warp_points(H0, pt.reshape(1, 2))[0]
+        if (court[0] < -OOB_MARGIN_M or court[0] > COURT_WIDTH + OOB_MARGIN_M or
+                court[1] < -OOB_MARGIN_M or court[1] > COURT_LENGTH + OOB_MARGIN_M):
+            clip += 1
+        else:
+            ok += 1
+    return ok, miss, clip
+
+
 def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                        device="cpu", tracknet_weights=None, inpaintnet_weights=None,
                        use_mbh=False, llm_provider=None, llm_key=None, max_frames=None,
@@ -178,6 +201,7 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
     # off-court) before rectification/warp, keeping smooth real/aerial detections.
     shuttle_px, img_gated = shuttlemod.gate_image_velocity(
         shuttle_px, max_step_px=SHUTTLE_IMG_MAX_STEP_PX)
+    full_px = shuttle_px.copy()  # full-frame detections, pre-far-merge (for C eval)
     if debug:
         print(f"[diag] image_velocity_gate removed={img_gated} "
               f"(max_step={SHUTTLE_IMG_MAX_STEP_PX}px)")
@@ -191,7 +215,8 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
         shuttle_px, far_used = _merge_far_tile(shuttle_px, far_px, net_y)
         if debug:
             print(f"[diag] far_tile merged={far_used} (trusted in far half, net_y={net_y:.0f})")
-    raw_tracknet_mask = ~np.isnan(shuttle_px).any(axis=1)  # real detections, pre-rectify
+    raw_tracknet_mask = ~np.isnan(full_px).any(axis=1)  # real full-frame detections, pre-rectify
+    merged_px = shuttle_px.copy()  # pre-rectify merged (full + far-tile fill), for C eval
     if inpaintnet is not None and frame_hw is not None:
         shuttle_px = inpaintmod.rectify_trajectory(
             shuttle_px, frame_hw[1], frame_hw[0], inpaintnet, device=device, seq_len=16)
@@ -250,6 +275,22 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                 raw_miss += 1
         print(f"[diag] labeled-frame shuttle: ok={ok} raw_tracknet_miss={raw_miss} "
               f"oob_clip_loss={clip_loss} (of {len(lf)} labels)")
+        # Phase C eval: compare full-frame vs far-tile vs merged on labeled frames,
+        # and isolate the far-side labels (where C is meant to help). This answers
+        # whether the far tile recovers misses / improves far-shuttle quality rather
+        # than just injecting noise (which the raw labeled-frame line can't show).
+        if far_net is not None and len(lf):
+            sources = [("full", full_px), ("merged", merged_px)]
+            if far_px is not None:
+                sources.append(("far_tile", far_px))
+            for tag, traj in sources:
+                o, m, c = _labeled_recall(traj, Hs, H0, lf)
+                print(f"[diag] far-tile eval '{tag}': labeled ok={o} miss={m} oob_clip={c} (of {len(lf)})")
+            far_labels = [x for x in lf if x[1] == "far"]
+            if far_labels:
+                for tag, traj in sources:
+                    o, m, c = _labeled_recall(traj, Hs, H0, far_labels)
+                    print(f"[diag] far-side labels '{tag}': ok={o} miss={m} oob_clip={c} (of {len(far_labels)})")
     shuttle_court[oob] = np.nan
     oob_clipped = pre_oob - int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     # Filter wild in-bounds detections (teleports) the OOB box missed.
