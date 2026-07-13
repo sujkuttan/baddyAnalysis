@@ -7,6 +7,12 @@ COURT_LENGTH = 13.4
 # outside the court lines are treated as false positives (stands / teleports).
 # Kept generous so legitimately out-of-bounds shots are not discarded.
 OOB_MARGIN_M = 2.0
+# The floor homography cannot represent a shuttle ABOVE the far baseline (a high
+# clear/smash arcs above the back line, in the air), so such detections extrapolate
+# to negative court-y and get clipped as if off-court. Allow a much larger margin on
+# the far (negative-y) side so real aerial shots survive; keep x / near-y at
+# OOB_MARGIN_M so corner/background false positives still clip. See diag oob-labeled.
+OOB_MARGIN_FAR_Y = 7.0
 
 # Hard cap on instantaneous shuttle speed (m/s). Detections above this are
 # treated as wild in-bounds teleports and nulled before contact detection.

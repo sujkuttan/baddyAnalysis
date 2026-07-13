@@ -13,8 +13,8 @@ from .config import (STROKE_TO_ID, canonical_stroke, COURT_LENGTH, COURT_WIDTH,
                      IMAGE_CONTACT_MAX_DIST_PX, TRACKNET_HEAT_THRESH, ATTRIB_MAX_DIST_M,
                      HALF_AWARE_ATTRIB, HALF_AWARE_TOL_M, HALF_AWARE_GATE_M,
                      TRACKNET_COURT_CROP, TRACKNET_CROP_MARGINS, SHUTTLE_IMG_MAX_STEP_PX,
-                     TRACKNET_FAR_TILE, TRACKNET_FAR_MARGINS, TRACKNET_FAR_HEAT_THRESH,
-                     TRACKNET_IMG_SIZE)
+                      TRACKNET_FAR_TILE, TRACKNET_FAR_MARGINS, TRACKNET_FAR_HEAT_THRESH,
+                      TRACKNET_IMG_SIZE, OOB_MARGIN_FAR_Y)
 
 
 def _wrist_stream(players, pid):
@@ -98,7 +98,7 @@ def _labeled_recall(traj_px, Hs, H0, labels):
             continue
         court = stabilize.warp_points(H0, pt.reshape(1, 2))[0]
         if (court[0] < -OOB_MARGIN_M or court[0] > COURT_WIDTH + OOB_MARGIN_M or
-                court[1] < -OOB_MARGIN_M or court[1] > COURT_LENGTH + OOB_MARGIN_M):
+                court[1] < -OOB_MARGIN_FAR_Y or court[1] > COURT_LENGTH + OOB_MARGIN_M):
             clip += 1
         else:
             ok += 1
@@ -228,26 +228,31 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
             shuttle_court[i] = stabilize.warp_points(H0, np.array(shuttle_px[i], dtype=np.float64).reshape(1, 2))[0]
     pre_oob = int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     # Mask shuttle detections far outside the court (stands / teleports). The
-    # margin is kept generous so legitimately out-of-bounds shots survive.
+    # margin is generous on x and near-y so out-of-bounds shots survive, but the
+    # far (negative-y) side uses a much larger margin: the court-FLOOR homography
+    # cannot represent a shuttle ABOVE the far baseline (high clears/smashes arc in
+    # the air), so those extrapolate to negative y and must not be clipped as OOB.
     oob = ((shuttle_court[:, 0] < -OOB_MARGIN_M) | (shuttle_court[:, 0] > COURT_WIDTH + OOB_MARGIN_M) |
-           (shuttle_court[:, 1] < -OOB_MARGIN_M) | (shuttle_court[:, 1] > COURT_LENGTH + OOB_MARGIN_M))
+           (shuttle_court[:, 1] < -OOB_MARGIN_FAR_Y) | (shuttle_court[:, 1] > COURT_LENGTH + OOB_MARGIN_M))
     if debug and oob.any():
         clx = shuttle_court[oob, 0]
         cly = shuttle_court[oob, 1]
         print(f"[diag] OOB extent: x[{np.nanmin(clx):.2f},{np.nanmax(clx):.2f}] "
-              f"y[{np.nanmin(cly):.2f},{np.nanmax(cly):.2f}] (margin={OOB_MARGIN_M})")
+              f"y[{np.nanmin(cly):.2f},{np.nanmax(cly):.2f}] "
+              f"(x/near-y margin={OOB_MARGIN_M}, far-y margin={OOB_MARGIN_FAR_Y})")
         # Decompose the OOB loss: were the clipped points REAL TrackNet detections
         # (signal we're throwing away) or InpaintNet-fabricated interpolations? And
         # are they far-half aerial (negative y = above/behind the far baseline),
         # which the court-FLOOR homography wrongly extrapolates off-court?
         oob_real = int(np.sum(oob & raw_tracknet_mask))
         oob_fab = int(np.sum(oob & ~raw_tracknet_mask))
-        y_neg = int(np.sum(oob & (shuttle_court[:, 1] < -OOB_MARGIN_M)))   # beyond far baseline
+        y_neg = int(np.sum(oob & (shuttle_court[:, 1] < -OOB_MARGIN_FAR_Y)))   # beyond far baseline
         y_pos = int(np.sum(oob & (shuttle_court[:, 1] > COURT_LENGTH + OOB_MARGIN_M)))
         x_oob = int(np.sum(oob & ((shuttle_court[:, 0] < -OOB_MARGIN_M) |
                                   (shuttle_court[:, 0] > COURT_WIDTH + OOB_MARGIN_M))))
         print(f"[diag] OOB breakdown: real_tracknet={oob_real} inpaint_fabricated={oob_fab} | "
-              f"beyond_far_baseline(y<0)={y_neg} beyond_near_baseline(y>L)={y_pos} sideways(x)={x_oob}")
+              f"beyond_far_baseline(y<-{OOB_MARGIN_FAR_Y:.0f})={y_neg} "
+              f"beyond_near_baseline(y>L)={y_pos} sideways(x)={x_oob}")
     # For labeled frames whose final shuttle is invalid: was it a RAW TrackNet
     # miss (detection problem) or a real detection lost to OOB clipping (warp
     # problem)? These need opposite fixes; localize before changing OOB logic.
@@ -316,7 +321,8 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                     d = float(np.hypot(pt[0] - k[0], pt[1] - k[1]))
                     if d < best[0]:
                         best = (d, p, "wrist" if idx in _WRIST else "body")
-            print(f"[diag] oob-labeled f={f} side={side} img=({pt[0]:.0f},{pt[1]:.0f}) "
+            cat = "aerial" if court[1] < -OOB_MARGIN_M else ("side" if (court[0] < -OOB_MARGIN_M or court[0] > COURT_WIDTH + OOB_MARGIN_M) else "near")
+            print(f"[diag] oob-labeled f={f} side={side} {cat} img=({pt[0]:.0f},{pt[1]:.0f}) "
                   f"court=({court[0]:.1f},{court[1]:.1f}) nearest=p{best[1]} {best[2]} d={best[0]:.0f}px")
     shuttle_court[oob] = np.nan
     oob_clipped = pre_oob - int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
