@@ -605,10 +605,13 @@ def _label_frame_map(labels_csv):
 def _side_agreement(labels_csv, contacts, attrib, players, shuttle_court=None, match_window=15):
     """Validate attribution against the labels' near/far `side`.
 
-    For each labeled hit frame, run the SAME nearest-wrist logic used by
-    attribute_contact (over a small window) and compare the winning player's side
-    to the label's side. This tests attribution directly at ground-truth frames,
-    independent of whether a contact was separately detected there."""
+    Uses the PIPELINE's deployed attribution (`attrib`, produced by
+    attribute_contact -- half-aware) mapped from each detected contact to its
+    labeled frame, so the metric reflects what is actually shipped. (An earlier
+    version recomputed nearest-wrist here, which the pipeline does not use, and
+    thus misreported agreement.) A labeled frame is matched to the nearest
+    attributed contact within `match_window`; if none, it is skipped. The
+    nearest-wrist distance is still printed for each mismatch as a diagnostic."""
     import csv as _csv
     gt = [r for r in _csv.DictReader(open(labels_csv)) if r.get("label_status") == "labeled"]
     sides = {}
@@ -621,6 +624,11 @@ def _side_agreement(labels_csv, contacts, attrib, players, shuttle_court=None, m
         return
     sh = np.array(shuttle_court, dtype=np.float64) if shuttle_court is not None else None
     WRIST = (9, 10)
+    # Deployed attribution: detected contact frame -> attributed pid.
+    cf_to_pid = {}
+    for c, a in zip(contacts, attrib):
+        if a is not None:
+            cf_to_pid[c] = a
     agree = mism = skip = 0
     mismatches = []
     for g in gt:
@@ -629,39 +637,43 @@ def _side_agreement(labels_csv, contacts, attrib, players, shuttle_court=None, m
         except Exception:
             continue
         side = g.get("side")
-        if side not in ("near", "far") or lf >= len(players[next(iter(players))]["pose_court"]):
+        if side not in ("near", "far"):
             continue
-        if sh is not None and (lf >= len(sh) or np.any(np.isnan(sh[lf]))):
+        near_c = min(cf_to_pid, key=lambda c: abs(c - lf)) if cf_to_pid else None
+        if near_c is None or abs(near_c - lf) > match_window:
             skip += 1
             continue
-        target = None if sh is None else sh[lf]
-        best_pid, best_d = None, np.inf
-        lo = max(0, lf - 3)
-        hi = min(len(players[next(iter(players))]["pose_court"]), lf + 4)
-        for pid in sides:
-            pseq = players[pid]["pose_court"]
-            if len(pseq) <= lo:
-                continue
-            for pose in pseq[lo:hi]:
-                for wi in WRIST:
-                    w = pose[wi]
-                    if np.any(np.isnan(w)):
-                        continue
-                    d = 0.0 if target is None else float(np.linalg.norm(w - target))
-                    if d < best_d:
-                        best_d, best_pid = d, pid
-        if best_pid is None or best_d > ATTRIB_MAX_DIST_M:
+        pid = cf_to_pid[near_c]
+        pred_side = sides.get(pid)
+        if pred_side is None:
             skip += 1
             continue
-        if sides[best_pid] == side:
+        # Diagnostic only: nearest-wrist distance at this labeled frame.
+        best_d = np.inf
+        if sh is not None and lf < len(sh) and not np.any(np.isnan(sh[lf])):
+            target = sh[lf]
+            lo = max(0, lf - 3)
+            hi = min(len(players[next(iter(players))]["pose_court"]), lf + 4)
+            for p in sides:
+                pseq = players[p]["pose_court"]
+                if len(pseq) <= lo:
+                    continue
+                for pose in pseq[lo:hi]:
+                    for wi in WRIST:
+                        w = pose[wi]
+                        if np.any(np.isnan(w)):
+                            continue
+                        d = float(np.linalg.norm(w - target))
+                        best_d = min(best_d, d)
+        if pred_side == side:
             agree += 1
         else:
             mism += 1
-            mismatches.append((lf, sides[best_pid], side, round(best_d, 2)))
+            mismatches.append((lf, pred_side, side, round(best_d, 2)))
     total = agree + mism
     if total:
         print(f"[validate] side_agreement vs labels: {agree}/{total} "
-              f"({100 * agree / total:.1f}%)  skipped(no shuttle/pose)={skip}")
+              f"({100 * agree / total:.1f}%)  skipped(no contact within {match_window}f)={skip}")
         for m in mismatches[:20]:
             print(f"[validate]   mismatch label_frame={m[0]} pred={m[1]} label={m[2]} wrist_dist={m[3]}")
 
