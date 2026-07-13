@@ -53,14 +53,17 @@ def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=Non
                       half_tol=1.0, half_gate=4.0):
     """Assign each contact frame to the player who hit.
 
-    Two modes:
-    - `half_aware=True` (default): a hit belongs to the player on the half of
-      the court where the shuttle is, provided that player has a wrist within
-      `half_gate` m (generous, to tolerate shuttle-warp noise). Only near the
-      net (shuttle_y within `half_tol` of center) or when the half-owner's wrist
-      is invalid does it fall back to the globally-nearest wrist. This stops the
-      better-detected/centered player from stealing hits that occur on the other
-      player's half (the main source of the near/far attribution bias).
+    Attribution priority:
+    - **Nearest wrist within `max_dist`** is the primary cue. At a real contact
+      the shuttle sits next to the hitting player's wrist, so this is the most
+      robust signal and must win even if the (noisy, extrapolated) court half
+      disagrees -- a bad shuttle detection warps to the wrong half and would
+      otherwise mis-attribute (see side_agreement regression when half led).
+    - **Half-aware fallback** (`half_aware=True`, default): only when no player
+      is within `max_dist`, if the shuttle is clearly on one half and that half's
+      player has a wrist within `half_gate` m, attribute to that player. Tolerant
+      of warp noise when the shuttle is genuinely between/away from both players.
+      Near the net it falls back to the nearest wrist.
     - `half_aware=False`: plain nearest-wrist within `max_dist` (legacy).
 
     A contact is dropped (None) when no valid wrist is within range."""
@@ -116,7 +119,19 @@ def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=Non
 
         chosen = None
         mode = "NEAR"
-        if half_aware and target is not None and half_of:
+        # Primary signal: nearest wrist within max_dist. At a real contact the
+        # shuttle sits next to the hitting player's wrist, so this is the most
+        # robust cue and must NOT be overridden by the (noisy, extrapolated) court
+        # half -- a bad shuttle detection warps to the wrong half and half-aware
+        # would then mis-attribute. See side_agreement regression when half led.
+        if best_pid is not None and best_d <= max_dist:
+            chosen = best_pid
+            mode = "NEAR"
+        # Fallback: no player within max_dist, but the shuttle is clearly on one
+        # half and that half's player has a wrist within half_gate -> use the half
+        # (tolerant of warp noise when the shuttle is genuinely away from both
+        # players but on one side). Near the net, use the nearest wrist.
+        elif half_aware and target is not None and half_of:
             sy = target[1]
             if sy < net - half_tol:
                 cand = [p for p, h in half_of.items() if h == "far"]
@@ -124,8 +139,6 @@ def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=Non
                 cand = [p for p, h in half_of.items() if h == "near"]
             else:
                 cand = list(half_of.keys())  # near net: use nearest wrist
-            # Among candidates, prefer the one with a valid wrist; require it to
-            # be within half_gate (tolerant of warp noise). Pick nearest if several.
             cand_valid = [(p, per_pid[p]) for p in cand if p in per_pid]
             if cand_valid:
                 cand_valid.sort(key=lambda kv: kv[1])
@@ -133,10 +146,6 @@ def attribute_contact(contact_frames, poses_court, shuttle_court, player_ids=Non
                 if cd <= half_gate:
                     chosen = cpid
                     mode = "HALF" if (sy < net - half_tol or sy > net + half_tol) else "NEAR"
-        if chosen is None:
-            if best_pid is not None and best_d <= max_dist:
-                chosen = best_pid
-                mode = "NEAR"
         if chosen is not None:
             attrib.append(chosen)
         else:
