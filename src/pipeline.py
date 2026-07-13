@@ -291,6 +291,33 @@ def run_full_pipeline(video, corners, out_dir="data", labels_csv=None,
                 for tag, traj in sources:
                     o, m, c = _labeled_recall(traj, Hs, H0, far_labels)
                     print(f"[diag] far-side labels '{tag}': ok={o} miss={m} oob_clip={c} (of {len(far_labels)})")
+        # OOB-vs-player: for labeled frames whose shuttle warped off-court, print the
+        # raw (pre-rectify) image detection vs the nearest player keypoint. If d is
+        # small (<~100px) TrackNet fired on the player/racket at contact, not the real
+        # shuttle -- a detection-localization problem, not a warp/coverage problem.
+        _WRIST = (9, 10); _BODY = (5, 6, 11, 12)
+        for f, side in lf:
+            if f >= len(oob) or not oob[f] or f >= len(merged_px):
+                continue
+            pt = np.array(merged_px[f], dtype=np.float64)
+            if np.any(np.isnan(pt)):
+                continue  # a miss/fabrication, not a real detection that warped OOB
+            court = stabilize.warp_points(H0, pt.reshape(1, 2))[0]
+            best = (1e9, -1, "")
+            for p, pdat in players.items():
+                pimg = pdat.get("pose_img")
+                if pimg is None or f >= len(pimg):
+                    continue
+                kp = np.array(pimg[f], dtype=np.float64)
+                for idx in _WRIST + _BODY:
+                    k = kp[idx]
+                    if np.any(np.isnan(k)):
+                        continue
+                    d = float(np.hypot(pt[0] - k[0], pt[1] - k[1]))
+                    if d < best[0]:
+                        best = (d, p, "wrist" if idx in _WRIST else "body")
+            print(f"[diag] oob-labeled f={f} side={side} img=({pt[0]:.0f},{pt[1]:.0f}) "
+                  f"court=({court[0]:.1f},{court[1]:.1f}) nearest=p{best[1]} {best[2]} d={best[0]:.0f}px")
     shuttle_court[oob] = np.nan
     oob_clipped = pre_oob - int(np.sum(~np.isnan(shuttle_court).any(axis=1)))
     # Filter wild in-bounds detections (teleports) the OOB box missed.
